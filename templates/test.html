@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamWatcher - Test Mode</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 2em;
+        }
+
+        .nav-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: background 0.3s;
+        }
+
+        .nav-link:hover {
+            background: #f0f0f0;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #667eea;
+            color: white;
+        }
+
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .result-container {
+            margin-top: 30px;
+        }
+
+        .result-image {
+            max-width: 100%;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .result-info {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 25px;
+        }
+
+        .info-display {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .info-item {
+            text-align: center;
+        }
+
+        .info-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .info-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .info-value.unknown {
+            color: #999;
+            font-size: 1.5em;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .video-results {
+            margin-top: 20px;
+        }
+
+        .video-result-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 StreamWatcher - Test Mode</h1>
+            <a href="/" class="nav-link">← Back to Monitor</a>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('image')">Test Image</button>
+            <button class="tab" onclick="switchTab('video')">Test Video</button>
+        </div>
+
+        <!-- Image Test Tab -->
+        <div id="imageTab" class="tab-content active">
+            <div class="input-group">
+                <label for="imageFile">Upload Screenshot</label>
+                <input type="file" id="imageFile" accept="image/*">
+            </div>
+            <button onclick="testImage()" id="testImageBtn">Test Detection</button>
+
+            <div id="imageResult" class="result-container" style="display: none;">
+                <div style="margin-bottom: 20px;">
+                    <button onclick="toggleEditor()" id="editorToggleBtn"
+                        style="background: #28a745; margin-bottom: 10px;">✏️ Edit Regions</button>
+                    <div id="editorControls"
+                        style="display: none; background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <h3 style="margin-top: 0; color: #333; font-size: 1.1em;">Region Editor</h3>
+                        <p style="color: #666; font-size: 0.9em; margin-bottom: 15px;">Adjust the regions using the
+                            sliders. The system searches for "PROGRESSION" text first, then extracts level/prestige from
+                            relative positions.</p>
+
+                        <div style="margin-bottom: 15px;">
+                            <h4 style="color: #00ff00; margin-bottom: 10px;">Progression Search Region</h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">X
+                                        Position (%):</label>
+                                    <input type="range" id="progressionXSlider" min="0" max="100" step="1" value="33"
+                                        style="width: 100%;">
+                                    <span id="progressionXValue" style="font-size: 0.85em; color: #00ff00;">33%</span>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">Y
+                                        Position (%):</label>
+                                    <input type="range" id="progressionYSlider" min="0" max="100" step="1" value="0"
+                                        style="width: 100%;">
+                                    <span id="progressionYValue" style="font-size: 0.85em; color: #00ff00;">0%</span>
+                                </div>
+                                <div>
+                                    <label
+                                        style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">Width
+                                        (%):</label>
+                                    <input type="range" id="progressionWSlider" min="10" max="100" step="1" value="34"
+                                        style="width: 100%;">
+                                    <span id="progressionWValue" style="font-size: 0.85em; color: #00ff00;">34%</span>
+                                </div>
+                                <div>
+                                    <label
+                                        style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">Height
+                                        (%):</label>
+                                    <input type="range" id="progressionHSlider" min="10" max="100" step="1" value="15"
+                                        style="width: 100%;">
+                                    <span id="progressionHValue" style="font-size: 0.85em; color: #00ff00;">15%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <h4 style="color: #667eea; margin-bottom: 10px;">Level Region (relative to progression)</h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">X
+                                        Position (%):</label>
+                                    <input type="range" id="levelXSlider" min="0" max="100" step="1" value="30"
+                                        style="width: 100%;">
+                                    <span id="levelXValue" style="font-size: 0.85em; color: #667eea;">30%</span>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">Y
+                                        Position (%):</label>
+                                    <input type="range" id="levelYSlider" min="0" max="100" step="1" value="45"
+                                        style="width: 100%;">
+                                    <span id="levelYValue" style="font-size: 0.85em; color: #667eea;">45%</span>
+                                </div>
+                                <div>
+                                    <label
+                                        style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">Width
+                                        (%):</label>
+                                    <input type="range" id="levelWSlider" min="10" max="100" step="1" value="40"
+                                        style="width: 100%;">
+                                    <span id="levelWValue" style="font-size: 0.85em; color: #667eea;">40%</span>
+                                </div>
+                                <div>
+                                    <label
+                                        style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">Height
+                                        (%):</label>
+                                    <input type="range" id="levelHSlider" min="10" max="100" step="1" value="20"
+                                        style="width: 100%;">
+                                    <span id="levelHValue" style="font-size: 0.85em; color: #667eea;">20%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <h4 style="color: #f0f; margin-bottom: 10px;">Prestige Region (relative to progression)</h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">X
+                                        Position (%):</label>
+                                    <input type="range" id="prestigeXSlider" min="0" max="100" step="1" value="30"
+                                        style="width: 100%;">
+                                    <span id="prestigeXValue" style="font-size: 0.85em; color: #f0f;">30%</span>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">Y
+                                        Position (%):</label>
+                                    <input type="range" id="prestigeYSlider" min="0" max="100" step="1" value="30"
+                                        style="width: 100%;">
+                                    <span id="prestigeYValue" style="font-size: 0.85em; color: #f0f;">30%</span>
+                                </div>
+                                <div>
+                                    <label
+                                        style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">Width
+                                        (%):</label>
+                                    <input type="range" id="prestigeWSlider" min="10" max="100" step="1" value="50"
+                                        style="width: 100%;">
+                                    <span id="prestigeWValue" style="font-size: 0.85em; color: #f0f;">50%</span>
+                                </div>
+                                <div>
+                                    <label
+                                        style="display: block; font-size: 0.85em; color: #666; margin-bottom: 5px;">Height
+                                        (%):</label>
+                                    <input type="range" id="prestigeHSlider" min="10" max="100" step="1" value="15"
+                                        style="width: 100%;">
+                                    <span id="prestigeHValue" style="font-size: 0.85em; color: #f0f;">15%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="saveConfig()" style="background: #28a745; flex: 1;">💾 Save
+                                Configuration</button>
+                            <button onclick="resetToDefaults()" style="background: #6c757d; flex: 1;">↺ Reset to
+                                Defaults</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="position: relative; display: inline-block;">
+                    <img id="resultImage" class="result-image" alt="Detection result" style="display: block;">
+                    <canvas id="regionCanvas"
+                        style="position: absolute; top: 0; left: 0; pointer-events: none; display: none;"></canvas>
+                </div>
+
+                <div id="levelRoiContainer" style="margin-top: 20px; display: none;">
+                    <h3 style="margin-bottom: 10px; color: #666; font-size: 0.9em;">Debug: Level ROI (4x zoomed)</h3>
+                    <img id="levelRoiImage"
+                        style="max-width: 400px; border: 2px solid #667eea; border-radius: 8px; margin-bottom: 10px;"
+                        alt="Level ROI">
+                </div>
+                <div id="prestigeRoiContainer" style="margin-top: 20px; display: none;">
+                    <h3 style="margin-bottom: 10px; color: #666; font-size: 0.9em;">Debug: Prestige ROI (3x zoomed)</h3>
+                    <img id="prestigeRoiImage" style="max-width: 400px; border: 2px solid #f0f; border-radius: 8px;"
+                        alt="Prestige ROI">
+                </div>
+                <div id="prestigeOcrContainer"
+                    style="margin-top: 20px; display: none; background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #f0f;">
+                    <h3 style="margin-bottom: 10px; color: #666; font-size: 0.9em;">Debug: Prestige OCR Text</h3>
+                    <p
+                        style="color: #333; font-family: monospace; background: white; padding: 10px; border-radius: 4px; word-break: break-all;">
+                        <strong>Raw OCR Text:</strong> <span id="prestigeOcrText">—</span>
+                    </p>
+                    <p style="color: #666; font-size: 0.85em; margin-top: 10px;">
+                        This shows what OCR actually extracted from the prestige region. Use this to adjust the parsing
+                        logic.
+                    </p>
+                </div>
+                <div class="result-info">
+                    <div class="info-display">
+                        <div class="info-item">
+                            <div class="info-label">Prestige</div>
+                            <div class="info-value" id="testPrestige">—</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Level</div>
+                            <div class="info-value" id="testLevel">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Video Test Tab -->
+        <div id="videoTab" class="tab-content">
+            <div class="input-group">
+                <label for="videoFile">Upload Video (short clips recommended)</label>
+                <input type="file" id="videoFile" accept="video/*">
+            </div>
+            <button onclick="testVideo()" id="testVideoBtn">Test Detection</button>
+
+            <div id="videoResult" class="result-container" style="display: none;">
+                <div class="result-info">
+                    <h3>Detection Results</h3>
+                    <div id="videoResultsList" class="video-results"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="error-message" id="errorMsg"></div>
+        <div id="loading" class="loading" style="display: none;">Processing...</div>
+    </div>
+
+    <script>
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Show selected tab
+            document.getElementById(tabName + 'Tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function showError(message) {
+            const errorMsg = document.getElementById('errorMsg');
+            errorMsg.textContent = message;
+            errorMsg.classList.add('show');
+            setTimeout(() => {
+                errorMsg.classList.remove('show');
+            }, 5000);
+        }
+
+        async function testImage() {
+            const fileInput = document.getElementById('imageFile');
+            const testBtn = document.getElementById('testImageBtn');
+            const resultDiv = document.getElementById('imageResult');
+            const loading = document.getElementById('loading');
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showError('Please select an image file');
+                return;
+            }
+
+            testBtn.disabled = true;
+            loading.style.display = 'block';
+            resultDiv.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                const response = await fetch('/api/test_image', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Test failed');
+                }
+
+                // Display result
+                const resultImg = document.getElementById('resultImage');
+                resultImg.src = data.image;
+                resultImg.onload = () => {
+                    // Store template region for editor
+                    if (data.regions && data.regions.length > 0) {
+                        const region = data.regions[0]; // [x, y, w, h]
+                        // Store original region (will be scaled when drawing)
+                        templateRegion = {
+                            x: region[0],
+                            y: region[1],
+                            w: region[2],
+                            h: region[3]
+                        };
+                        if (editorMode) {
+                            drawRegions();
+                        }
+                    }
+                };
+
+                document.getElementById('testLevel').textContent = data.result?.level || '—';
+                document.getElementById('testPrestige').textContent = data.result?.prestige || '—';
+
+                // Show prestige OCR debug text
+                const prestigeOcrContainer = document.getElementById('prestigeOcrContainer');
+                if (data.result?.prestige_ocr_text) {
+                    prestigeOcrContainer.style.display = 'block';
+                    document.getElementById('prestigeOcrText').textContent = data.result.prestige_ocr_text || '(no text extracted)';
+                } else {
+                    prestigeOcrContainer.style.display = 'none';
+                }
+
+                // Show level ROI for debugging
+                const levelRoiContainer = document.getElementById('levelRoiContainer');
+                const levelRoiImage = document.getElementById('levelRoiImage');
+                if (data.level_roi) {
+                    levelRoiImage.src = data.level_roi;
+                    levelRoiContainer.style.display = 'block';
+                } else {
+                    levelRoiContainer.style.display = 'none';
+                }
+
+                // Show prestige ROI for debugging
+                const prestigeRoiContainer = document.getElementById('prestigeRoiContainer');
+                const prestigeRoiImage = document.getElementById('prestigeRoiImage');
+                if (data.prestige_roi) {
+                    prestigeRoiImage.src = data.prestige_roi;
+                    prestigeRoiContainer.style.display = 'block';
+                } else {
+                    prestigeRoiContainer.style.display = 'none';
+                }
+
+                if (data.result?.level) {
+                    document.getElementById('testLevel').classList.remove('unknown');
+                    document.getElementById('testPrestige').classList.remove('unknown');
+                } else {
+                    document.getElementById('testLevel').classList.add('unknown');
+                    document.getElementById('testPrestige').classList.add('unknown');
+                }
+
+                resultDiv.style.display = 'block';
+            } catch (error) {
+                showError('Error: ' + error.message);
+            } finally {
+                testBtn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+
+        // Region editor state
+        let editorMode = false;
+        let templateRegion = null; // The detected template region (x, y, w, h)
+
+        function toggleEditor() {
+            editorMode = !editorMode;
+            const editorControls = document.getElementById('editorControls');
+            const canvas = document.getElementById('regionCanvas');
+            const toggleBtn = document.getElementById('editorToggleBtn');
+
+            if (editorMode) {
+                editorControls.style.display = 'block';
+                canvas.style.display = 'block';
+                canvas.style.pointerEvents = 'auto';
+                toggleBtn.textContent = '✏️ Exit Editor';
+                toggleBtn.style.background = '#dc3545';
+                loadCurrentConfig();
+                drawRegions();
+            } else {
+                editorControls.style.display = 'none';
+                canvas.style.display = 'none';
+                canvas.style.pointerEvents = 'none';
+                toggleBtn.textContent = '✏️ Edit Regions';
+                toggleBtn.style.background = '#28a745';
+            }
+        }
+
+        function loadCurrentConfig() {
+            // Load current config from server
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.progression_region_config) {
+                        updateSlider('progressionXSlider', data.progression_region_config.x_percent * 100);
+                        updateSlider('progressionYSlider', data.progression_region_config.y_percent * 100);
+                        updateSlider('progressionWSlider', data.progression_region_config.width_percent * 100);
+                        updateSlider('progressionHSlider', data.progression_region_config.height_percent * 100);
+                    }
+                    if (data.level_region_config) {
+                        updateSlider('levelXSlider', data.level_region_config.x_percent * 100);
+                        updateSlider('levelYSlider', data.level_region_config.y_percent * 100);
+                        updateSlider('levelWSlider', data.level_region_config.width_percent * 100);
+                        updateSlider('levelHSlider', data.level_region_config.height_percent * 100);
+                    }
+                    if (data.prestige_region_config) {
+                        updateSlider('prestigeXSlider', data.prestige_region_config.x_percent * 100);
+                        updateSlider('prestigeYSlider', data.prestige_region_config.y_percent * 100);
+                        updateSlider('prestigeWSlider', data.prestige_region_config.width_percent * 100);
+                        updateSlider('prestigeHSlider', data.prestige_region_config.height_percent * 100);
+                    }
+                });
+        }
+
+        function updateSlider(id, value) {
+            const slider = document.getElementById(id);
+            const valueEl = document.getElementById(id.replace('Slider', 'Value'));
+            if (slider) {
+                slider.value = Math.round(value);
+                if (valueEl) {
+                    valueEl.textContent = Math.round(value) + '%';
+                }
+            }
+        }
+
+        function updateProgressionRegion() {
+            drawRegions();
+        }
+
+        function updateLevelRegion() {
+            drawRegions();
+        }
+
+        function updatePrestigeRegion() {
+            drawRegions();
+        }
+
+        function drawRegions() {
+            if (!editorMode || !templateRegion) return;
+
+            const canvas = document.getElementById('regionCanvas');
+            const img = document.getElementById('resultImage');
+            if (!canvas || !img || !img.complete) return;
+
+            // Match canvas size to image
+            const rect = img.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Get slider values
+            const progressionX = parseFloat(document.getElementById('progressionXSlider').value) / 100;
+            const progressionY = parseFloat(document.getElementById('progressionYSlider').value) / 100;
+            const progressionW = parseFloat(document.getElementById('progressionWSlider').value) / 100;
+            const progressionH = parseFloat(document.getElementById('progressionHSlider').value) / 100;
+
+            const levelX = parseFloat(document.getElementById('levelXSlider').value) / 100;
+            const levelY = parseFloat(document.getElementById('levelYSlider').value) / 100;
+            const levelW = parseFloat(document.getElementById('levelWSlider').value) / 100;
+            const levelH = parseFloat(document.getElementById('levelHSlider').value) / 100;
+
+            const prestigeX = parseFloat(document.getElementById('prestigeXSlider').value) / 100;
+            const prestigeY = parseFloat(document.getElementById('prestigeYSlider').value) / 100;
+            const prestigeW = parseFloat(document.getElementById('prestigeWSlider').value) / 100;
+            const prestigeH = parseFloat(document.getElementById('prestigeHSlider').value) / 100;
+
+            // Calculate scale from original image to displayed image
+            const scaleX = canvas.width / img.naturalWidth;
+            const scaleY = canvas.height / img.naturalHeight;
+
+            // Draw progression search region (green) - absolute position on screen
+            const progressionX_px = img.naturalWidth * progressionX * scaleX;
+            const progressionY_px = img.naturalHeight * progressionY * scaleY;
+            const progressionW_px = img.naturalWidth * progressionW * scaleX;
+            const progressionH_px = img.naturalHeight * progressionH * scaleY;
+
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([5, 5]);
+            ctx.strokeRect(progressionX_px, progressionY_px, progressionW_px, progressionH_px);
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.1)';
+            ctx.fillRect(progressionX_px, progressionY_px, progressionW_px, progressionH_px);
+
+            // If we have a template region (from detection), draw level/prestige relative to it
+            if (templateRegion) {
+                // Draw level region (cyan) - relative to progression region
+                const levelX_px = (templateRegion.x + templateRegion.w * levelX) * scaleX;
+                const levelY_px = (templateRegion.y + templateRegion.h * levelY) * scaleY;
+                const levelW_px = templateRegion.w * levelW * scaleX;
+                const levelH_px = templateRegion.h * levelH * scaleY;
+
+                ctx.strokeStyle = '#00ffff';
+                ctx.setLineDash([]);
+                ctx.strokeRect(levelX_px, levelY_px, levelW_px, levelH_px);
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.1)';
+                ctx.fillRect(levelX_px, levelY_px, levelW_px, levelH_px);
+
+                // Draw prestige region (magenta)
+                const prestigeX_px = (templateRegion.x + templateRegion.w * prestigeX) * scaleX;
+                const prestigeY_px = (templateRegion.y + templateRegion.h * prestigeY) * scaleY;
+                const prestigeW_px = templateRegion.w * prestigeW * scaleX;
+                const prestigeH_px = templateRegion.h * prestigeH * scaleY;
+
+                ctx.strokeStyle = '#ff00ff';
+                ctx.strokeRect(prestigeX_px, prestigeY_px, prestigeW_px, prestigeH_px);
+                ctx.fillStyle = 'rgba(255, 0, 255, 0.1)';
+                ctx.fillRect(prestigeX_px, prestigeY_px, prestigeW_px, prestigeH_px);
+            }
+        }
+
+        function saveConfig() {
+            const config = {
+                progression_region: {
+                    x_percent: parseFloat(document.getElementById('progressionXSlider').value) / 100,
+                    y_percent: parseFloat(document.getElementById('progressionYSlider').value) / 100,
+                    width_percent: parseFloat(document.getElementById('progressionWSlider').value) / 100,
+                    height_percent: parseFloat(document.getElementById('progressionHSlider').value) / 100
+                },
+                level_region: {
+                    x_percent: parseFloat(document.getElementById('levelXSlider').value) / 100,
+                    y_percent: parseFloat(document.getElementById('levelYSlider').value) / 100,
+                    width_percent: parseFloat(document.getElementById('levelWSlider').value) / 100,
+                    height_percent: parseFloat(document.getElementById('levelHSlider').value) / 100
+                },
+                prestige_region: {
+                    x_percent: parseFloat(document.getElementById('prestigeXSlider').value) / 100,
+                    y_percent: parseFloat(document.getElementById('prestigeYSlider').value) / 100,
+                    width_percent: parseFloat(document.getElementById('prestigeWSlider').value) / 100,
+                    height_percent: parseFloat(document.getElementById('prestigeHSlider').value) / 100
+                }
+            };
+
+            fetch('/api/update_config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(config)
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('✅ Configuration saved successfully!');
+                        // Re-run detection with new config
+                        testImage();
+                    } else {
+                        alert('❌ Error saving configuration: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    alert('❌ Error saving configuration: ' + error.message);
+                });
+        }
+
+        function resetToDefaults() {
+            if (confirm('Reset to default configuration?')) {
+                updateSlider('progressionXSlider', 33);
+                updateSlider('progressionYSlider', 0);
+                updateSlider('progressionWSlider', 34);
+                updateSlider('progressionHSlider', 15);
+                updateSlider('levelXSlider', 30);
+                updateSlider('levelYSlider', 45);
+                updateSlider('levelWSlider', 40);
+                updateSlider('levelHSlider', 20);
+                updateSlider('prestigeXSlider', 30);
+                updateSlider('prestigeYSlider', 30);
+                updateSlider('prestigeWSlider', 50);
+                updateSlider('prestigeHSlider', 15);
+                updateProgressionRegion();
+                updateLevelRegion();
+                updatePrestigeRegion();
+            }
+        }
+
+        // Setup sliders on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const sliders = [
+                { id: 'progressionXSlider', valueId: 'progressionXValue', update: updateProgressionRegion },
+                { id: 'progressionYSlider', valueId: 'progressionYValue', update: updateProgressionRegion },
+                { id: 'progressionWSlider', valueId: 'progressionWValue', update: updateProgressionRegion },
+                { id: 'progressionHSlider', valueId: 'progressionHValue', update: updateProgressionRegion },
+                { id: 'levelXSlider', valueId: 'levelXValue', update: updateLevelRegion },
+                { id: 'levelYSlider', valueId: 'levelYValue', update: updateLevelRegion },
+                { id: 'levelWSlider', valueId: 'levelWValue', update: updateLevelRegion },
+                { id: 'levelHSlider', valueId: 'levelHValue', update: updateLevelRegion },
+                { id: 'prestigeXSlider', valueId: 'prestigeXValue', update: updatePrestigeRegion },
+                { id: 'prestigeYSlider', valueId: 'prestigeYValue', update: updatePrestigeRegion },
+                { id: 'prestigeWSlider', valueId: 'prestigeWValue', update: updatePrestigeRegion },
+                { id: 'prestigeHSlider', valueId: 'prestigeHValue', update: updatePrestigeRegion }
+            ];
+
+            sliders.forEach(slider => {
+                const sliderEl = document.getElementById(slider.id);
+                const valueEl = document.getElementById(slider.valueId);
+                if (sliderEl && valueEl) {
+                    sliderEl.addEventListener('input', (e) => {
+                        valueEl.textContent = e.target.value + '%';
+                        slider.update();
+                    });
+                }
+            });
+
+            // Redraw regions on window resize
+            window.addEventListener('resize', () => {
+                if (editorMode) {
+                    drawRegions();
+                }
+            });
+        });
+
+        async function testVideo() {
+            const fileInput = document.getElementById('videoFile');
+            const testBtn = document.getElementById('testVideoBtn');
+            const resultDiv = document.getElementById('videoResult');
+            const loading = document.getElementById('loading');
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showError('Please select a video file');
+                return;
+            }
+
+            testBtn.disabled = true;
+            loading.style.display = 'block';
+            resultDiv.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                const response = await fetch('/api/test_video', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Test failed');
+                }
+
+                // Display results
+                const resultsList = document.getElementById('videoResultsList');
+                if (data.results && data.results.length > 0) {
+                    resultsList.innerHTML = `
+                        <p><strong>Found ${data.results.length} detections in ${data.total_frames} frames:</strong></p>
+                        ${data.results.map(r => `
+                            <div class="video-result-item">
+                                Frame ${r.frame}: Level ${r.level}, Prestige ${r.prestige}
+                            </div>
+                        `).join('')}
+                    `;
+                } else {
+                    resultsList.innerHTML = `<p>No detections found in ${data.total_frames} frames.</p>`;
+                }
+
+                resultDiv.style.display = 'block';
+            } catch (error) {
+                showError('Error: ' + error.message);
+            } finally {
+                testBtn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+
+</html>

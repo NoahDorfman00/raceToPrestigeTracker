@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamWatcher - Multi-Stream Level Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 1em;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 25px;
+        }
+
+        .card-title {
+            font-size: 1.5em;
+            color: #333;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .add-stream-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .add-stream-form input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        .add-stream-form input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .add-stream-form button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .add-stream-form button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .add-stream-form button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .streams-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .stream-item {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s;
+        }
+
+        .stream-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+
+        .stream-item.selected {
+            background: #667eea;
+            color: white;
+        }
+
+        .stream-info {
+            flex: 1;
+        }
+
+        .stream-name {
+            font-weight: 600;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+
+        .stream-level {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .stream-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn-select {
+            padding: 8px 16px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .btn-select:hover {
+            background: #218838;
+        }
+
+        .btn-select.selected {
+            background: #155724;
+        }
+
+        .btn-remove {
+            padding: 8px 16px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .btn-remove:hover {
+            background: #c82333;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-indicator.active {
+            background: #28a745;
+            box-shadow: 0 0 8px rgba(40, 167, 69, 0.5);
+        }
+
+        .status-indicator.inactive {
+            background: #dc3545;
+        }
+
+        .leaderboard {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .leaderboard-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            transition: all 0.3s;
+        }
+
+        .leaderboard-item:hover {
+            background: #e9ecef;
+        }
+
+        .leaderboard-item.rank-1 {
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+            font-weight: 600;
+        }
+
+        .leaderboard-item.rank-2 {
+            background: linear-gradient(135deg, #c0c0c0 0%, #e8e8e8 100%);
+        }
+
+        .leaderboard-item.rank-3 {
+            background: linear-gradient(135deg, #cd7f32 0%, #e6a85c 100%);
+        }
+
+        .rank-number {
+            font-size: 1.5em;
+            font-weight: bold;
+            width: 50px;
+            text-align: center;
+            color: #333;
+        }
+
+        .leaderboard-info {
+            flex: 1;
+            margin-left: 15px;
+        }
+
+        .leaderboard-name {
+            font-weight: 600;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+
+        .leaderboard-level {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .video-section {
+            grid-column: 1 / -1;
+        }
+
+        .video-container {
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+        }
+
+        #videoStream {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .video-label {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .stat-item {
+            flex: 1;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 StreamWatcher</h1>
+            <p class="subtitle">Multi-Stream Call of Duty Level & Prestige Tracker</p>
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="totalStreams">0</div>
+                    <div class="stat-label">Active Streams</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="maxStreams">10</div>
+                    <div class="stat-label">Max Streams</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="error-message" id="errorMsg"></div>
+
+        <div class="main-grid">
+            <div class="card">
+                <div class="card-title">📺 Monitored Streams</div>
+                <div class="add-stream-form">
+                    <input type="text" id="streamUrl" placeholder="Twitch URL or username">
+                    <input type="text" id="streamerName" placeholder="Streamer name (optional)">
+                    <button id="addBtn" onclick="addStream()">Add Stream</button>
+                </div>
+                <div class="streams-list" id="streamsList">
+                    <div class="empty-state">No streams added yet. Add a stream to start monitoring.</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">🏆 Leaderboard</div>
+                <div class="leaderboard" id="leaderboard">
+                    <div class="empty-state">No streams to rank yet.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card video-section">
+            <div class="video-label">🔍 Live Monitor - <span id="monitoringStream">Select a stream to monitor</span>
+            </div>
+            <div class="video-container">
+                <img id="videoStream" src="/video_feed" alt="Stream feed">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedStreamId = null;
+        let refreshInterval = null;
+
+        function showError(message) {
+            const errorMsg = document.getElementById('errorMsg');
+            errorMsg.textContent = message;
+            errorMsg.classList.add('show');
+            setTimeout(() => {
+                errorMsg.classList.remove('show');
+            }, 5000);
+        }
+
+        async function addStream() {
+            const streamUrl = document.getElementById('streamUrl').value.trim();
+            const streamerName = document.getElementById('streamerName').value.trim();
+
+            if (!streamUrl) {
+                showError('Please enter a stream URL or username');
+                return;
+            }
+
+            const addBtn = document.getElementById('addBtn');
+            addBtn.disabled = true;
+            addBtn.textContent = 'Adding...';
+
+            try {
+                const response = await fetch('/api/streams/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        stream_url: streamUrl,
+                        streamer_name: streamerName || null
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to add stream');
+                }
+
+                // Clear inputs
+                document.getElementById('streamUrl').value = '';
+                document.getElementById('streamerName').value = '';
+
+                // Refresh lists
+                await refreshAll();
+                showError('Stream added successfully!');
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                addBtn.disabled = false;
+                addBtn.textContent = 'Add Stream';
+            }
+        }
+
+        function toggleMonitor(streamId) {
+            if (selectedStreamId === streamId) {
+                // Stop monitoring - clear selection
+                selectedStreamId = null;
+                document.getElementById('videoStream').src = '/video_feed?stop=true';
+                document.getElementById('monitoringStream').textContent = 'Select a stream to monitor';
+                refreshStreams(); // Update button text
+            } else {
+                // Start monitoring this stream (will automatically stop any existing preview)
+                selectStream(streamId);
+            }
+        }
+
+        async function removeStream(streamId) {
+            if (!confirm('Are you sure you want to remove this stream?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/streams/remove', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ stream_id: streamId }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to remove stream');
+                }
+
+                // If removed stream was selected, clear selection
+                if (selectedStreamId === streamId) {
+                    selectedStreamId = null;
+                    document.getElementById('videoStream').src = '/video_feed';
+                    document.getElementById('monitoringStream').textContent = 'Select a stream to monitor';
+                }
+
+                await refreshAll();
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        async function selectStream(streamId) {
+            // If another stream is being monitored, stop it first
+            if (selectedStreamId !== null && selectedStreamId !== streamId) {
+                // Clear the old selection (but don't refresh yet)
+                const oldStreamId = selectedStreamId;
+                selectedStreamId = null;
+            }
+
+            selectedStreamId = streamId;
+
+            // Get stream info to display name
+            try {
+                const response = await fetch(`/api/streams/${streamId}`);
+                const streamData = await response.json();
+                const streamName = streamData.streamer_name || streamData.stream_url;
+                document.getElementById('monitoringStream').textContent = `Monitoring: ${streamName}`;
+            } catch (error) {
+                document.getElementById('monitoringStream').textContent = `Monitoring: Stream ${streamId}`;
+            }
+
+            // Update video feed - this will automatically stop any previous preview
+            document.getElementById('videoStream').src = `/video_feed/${streamId}?t=${Date.now()}`;
+            await refreshStreams();
+        }
+
+        async function refreshStreams() {
+            try {
+                const response = await fetch('/api/streams');
+                const data = await response.json();
+
+                const streamsList = document.getElementById('streamsList');
+                streamsList.innerHTML = '';
+
+                if (data.streams.length === 0) {
+                    streamsList.innerHTML = '<div class="empty-state">No streams added yet. Add a stream to start monitoring.</div>';
+                    return;
+                }
+
+                data.streams.forEach(stream => {
+                    const streamItem = document.createElement('div');
+                    streamItem.className = `stream-item ${selectedStreamId === stream.id ? 'selected' : ''}`;
+
+                    const isActive = stream.is_active;
+                    const statusClass = isActive ? 'active' : 'inactive';
+                    const isMonitoring = selectedStreamId === stream.id;
+
+                    streamItem.innerHTML = `
+                        <div class="stream-info">
+                            <div class="stream-name">
+                                <span class="status-indicator ${statusClass}"></span>
+                                ${stream.streamer_name || stream.stream_url}
+                            </div>
+                            <div class="stream-level">Prestige ${stream.prestige || 0} | Level ${stream.level || 0}</div>
+                        </div>
+                        <div class="stream-actions">
+                            <button class="btn-select ${isMonitoring ? 'selected' : ''}" 
+                                    onclick="toggleMonitor(${stream.id})">
+                                ${isMonitoring ? 'Stop Preview' : 'Monitor'}
+                            </button>
+                            <button class="btn-remove" onclick="removeStream(${stream.id})">Remove</button>
+                        </div>
+                    `;
+                    streamsList.appendChild(streamItem);
+                });
+
+                document.getElementById('totalStreams').textContent = data.count;
+                document.getElementById('maxStreams').textContent = data.max_streams;
+            } catch (error) {
+                console.error('Error refreshing streams:', error);
+            }
+        }
+
+        async function refreshLeaderboard() {
+            try {
+                const response = await fetch('/api/leaderboard');
+                const data = await response.json();
+
+                const leaderboard = document.getElementById('leaderboard');
+                leaderboard.innerHTML = '';
+
+                if (data.leaderboard.length === 0) {
+                    leaderboard.innerHTML = '<div class="empty-state">No streams to rank yet.</div>';
+                    return;
+                }
+
+                data.leaderboard.forEach(entry => {
+                    const item = document.createElement('div');
+                    const rankClass = entry.rank <= 3 ? `rank-${entry.rank}` : '';
+                    item.className = `leaderboard-item ${rankClass}`;
+
+                    item.innerHTML = `
+                        <div class="rank-number">#${entry.rank}</div>
+                        <div class="leaderboard-info">
+                            <div class="leaderboard-name">${entry.streamer_name || entry.stream_url}</div>
+                            <div class="leaderboard-level">Prestige ${entry.prestige} | Level ${entry.level}</div>
+                        </div>
+                    `;
+                    leaderboard.appendChild(item);
+                });
+            } catch (error) {
+                console.error('Error refreshing leaderboard:', error);
+            }
+        }
+
+        async function refreshAll() {
+            await Promise.all([refreshStreams(), refreshLeaderboard()]);
+        }
+
+        // Allow Enter key to add stream
+        document.getElementById('streamUrl').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addStream();
+            }
+        });
+
+        document.getElementById('streamerName').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addStream();
+            }
+        });
+
+        // Auto-refresh every 2 seconds
+        refreshInterval = setInterval(refreshAll, 2000);
+
+        // Initial load
+        refreshAll();
+    </script>
+</body>
+
+</html>
+
+</html>

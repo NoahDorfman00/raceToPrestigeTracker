@@ -1,0 +1,23 @@
+{
+    "progression_region": {
+        "x_percent": 0.33,
+        "y_percent": 0,
+        "width_percent": 0.34,
+        "height_percent": 0.71,
+        "description": "Search region for 'PROGRESSION' text (middle third of screen, top portion)"
+    },
+    "level_region": {
+        "x_percent": 0.36,
+        "y_percent": 0.72,
+        "width_percent": 0.3,
+        "height_percent": 0.16,
+        "description": "Region where the level number appears (relative to progression screen)"
+    },
+    "prestige_region": {
+        "x_percent": 0.26,
+        "y_percent": 0.61,
+        "width_percent": 0.5,
+        "height_percent": 0.1,
+        "description": "Region where prestige text appears, right above level number (relative to progression screen)"
+    }
+}
