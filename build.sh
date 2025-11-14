@@ -17,7 +17,7 @@ pip install setuptools==60.10.0 wheel
 apt-get update && apt-get install -y tesseract-ocr
 
 # Install base dependencies first (ones with reliable wheels)
-pip install numpy==1.26.2 Pillow==10.1.0 requests==2.31.0
+pip install numpy==1.26.2 Pillow requests==2.31.0
 
 # Install remaining dependencies
 pip install -r requirements.txt
