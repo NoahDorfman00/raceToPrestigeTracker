@@ -6,6 +6,7 @@ import time
 import subprocess
 import os
 import shutil
+import sys
 from typing import Dict, Optional, List
 from datetime import datetime
 from stream_capture import StreamCapture
@@ -577,12 +578,28 @@ class StreamManager:
     
     def _live_check_loop(self):
         """Background thread to periodically check if streams are live."""
+        check_count = 0
         while self.live_check_running:
             try:
+                check_count += 1
+                
                 # Get all stream IDs
                 stream_ids = []
                 with self.lock:
                     stream_ids = list(self.streams.keys())
+                
+                if not stream_ids:
+                    # No streams to check, sleep and continue
+                    print(f"Live check cycle {check_count}: No streams to check")
+                    time.sleep(self.live_check_interval)
+                    continue
+                
+                print(f"Live check cycle {check_count}: Checking {len(stream_ids)} stream(s)...")
+                sys.stdout.flush()
+                
+                streams_started = 0
+                streams_stopped = 0
+                streams_already_ok = 0
                 
                 for stream_id in stream_ids:
                     with self.lock:
@@ -601,25 +618,51 @@ class StreamManager:
                         if is_live:
                             # Stream is live - start capture if not already running
                             if not stream_info.is_running:
-                                print(f"Stream {stream_id} is now live, starting capture")
+                                print(f"Stream {stream_id} ({stream_info.streamer_name or stream_info.stream_url}) is now live, starting capture")
+                                sys.stdout.flush()
                                 stream_info.error = None
+                                streams_started += 1
                                 # Start in background to avoid blocking
                                 threading.Thread(
                                     target=self._start_stream_internal,
                                     args=(stream_id,),
                                     daemon=True
                                 ).start()
+                            else:
+                                streams_already_ok += 1
                         else:
                             # Stream is not live - stop capture if running
                             if stream_info.is_running:
-                                print(f"Stream {stream_id} is no longer live, stopping capture")
+                                print(f"Stream {stream_id} ({stream_info.streamer_name or stream_info.stream_url}) is no longer live, stopping capture")
+                                sys.stdout.flush()
+                                streams_stopped += 1
                                 self._stop_stream_internal(stream_id)
                                 stream_info.error = "Stream is not live"
+                            else:
+                                streams_already_ok += 1
+                
+                # Log summary of check cycle
+                status_summary = []
+                if streams_started > 0:
+                    status_summary.append(f"{streams_started} started")
+                if streams_stopped > 0:
+                    status_summary.append(f"{streams_stopped} stopped")
+                if streams_already_ok > 0:
+                    status_summary.append(f"{streams_already_ok} unchanged")
+                
+                if status_summary:
+                    print(f"Live check cycle {check_count} complete: {', '.join(status_summary)}. Next check in {int(self.live_check_interval)}s")
+                else:
+                    print(f"Live check cycle {check_count} complete. Next check in {int(self.live_check_interval)}s")
+                sys.stdout.flush()
                 
                 # Sleep before next check
                 time.sleep(self.live_check_interval)
             except Exception as e:
-                print(f"Error in live check loop: {e}")
+                print(f"Error in live check loop (cycle {check_count}): {e}")
+                import traceback
+                traceback.print_exc()
+                sys.stdout.flush()
                 time.sleep(self.live_check_interval)
     
     def start_live_check(self):

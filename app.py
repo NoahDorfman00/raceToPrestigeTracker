@@ -786,5 +786,6 @@ if __name__ == '__main__':
     print("  GET  /api/streams - Get all streams")
     print("  GET  /api/leaderboard - Get leaderboard")
     print()
-    app.run(debug=debug, host='0.0.0.0', port=port)
+    # Enable threading for production use (allows multiple concurrent requests)
+    app.run(debug=debug, host='0.0.0.0', port=port, threaded=True)
 
