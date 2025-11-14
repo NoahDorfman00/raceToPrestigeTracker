@@ -235,11 +235,46 @@ class StreamManager:
                                 with stream_info.frame_lock:
                                     stream_info.detection_regions = regions
                                 
+                                # Only save frames when we have a complete detection:
+                                # 1. Progression screen detected (result is not None)
+                                # 2. Level successfully extracted (new_level is not None and in valid range)
+                                # 3. Prestige successfully extracted (new_prestige is not None, can be 0)
+                                # 4. Valid progression region exists
                                 if result:
-                                    # Only save annotated frame and OCR logs when progression screen is detected
-                                    new_prestige = result.get('prestige', 0)
+                                    new_prestige = result.get('prestige')
                                     new_level = result.get('level')
                                     ocr_text = result.get('prestige_ocr_text', '')
+                                    
+                                    # Validate that we have all required detections
+                                    # Level must be valid (1-55)
+                                    if new_level is None:
+                                        print(f"Stream {stream_id}: Skipping frame save - no level detected (result exists but level is None)")
+                                        last_detection_time = current_time
+                                        continue
+                                    
+                                    # Prestige should always be set (defaults to 0 if not detected)
+                                    # But ensure it's a valid number, not None
+                                    if new_prestige is None:
+                                        new_prestige = 0
+                                    
+                                    # Additional validation: ensure we have a valid progression region
+                                    # Only save if we have regions and the first region is the progression screen
+                                    if not regions or len(regions) == 0:
+                                        print(f"Stream {stream_id}: Skipping frame save - no progression region detected")
+                                        last_detection_time = current_time
+                                        continue
+                                    
+                                    # Final validation: ensure level is in valid range (should already be validated by detect_multiple_regions)
+                                    min_level, max_level = self.level_detector.valid_level_range
+                                    if not (min_level <= new_level <= max_level):
+                                        print(f"Stream {stream_id}: Skipping frame save - level {new_level} out of valid range [{min_level}, {max_level}]")
+                                        last_detection_time = current_time
+                                        continue
+                                    
+                                    # All validations passed - this is a complete detection with progression, level, and prestige
+                                    # We will ALWAYS save the frame and OCR logs when we have a complete detection
+                                    # Progression validation only determines if we UPDATE the stored values
+                                    print(f"Stream {stream_id}: Complete detection - P{new_prestige} L{new_level} - saving frame and OCR logs")
                                     
                                     # Validate that level/prestige hasn't gone down
                                     # Calculate total progression: prestige * 1000 + level
@@ -264,22 +299,22 @@ class StreamManager:
                                         is_valid_progression = True
                                     else:
                                         # Level went down without prestige increase - invalid
-                                        print(f"Stream {stream_id}: Rejecting invalid progression - "
+                                        print(f"Stream {stream_id}: Invalid progression detected - "
                                               f"Current: P{stream_info.prestige} L{stream_info.level} ({current_total}), "
-                                              f"Detected: P{new_prestige} L{new_level} ({new_total})")
+                                              f"Detected: P{new_prestige} L{new_level} ({new_total}) - "
+                                              f"Will save frame/OCR but not update stored values")
                                         is_valid_progression = False
                                     
-                                    if not is_valid_progression:
-                                        # Skip this detection - it's invalid
-                                        continue
-                                    
-                                    # Create annotated frame for display
+                                    # Create annotated frame for display with all annotation boxes
                                     annotated_frame = frame.copy()
-                                    if regions:
+                                    if regions and len(regions) > 0:
+                                        # Use the first region (progression screen) as the detected region
+                                        # This ensures all annotation boxes are drawn
+                                        progression_region = regions[0]
                                         annotated_frame = self.level_detector.draw_detection_regions(
                                             annotated_frame,
                                             regions,
-                                            stream_info.detected_region if hasattr(stream_info, 'detected_region') else None,
+                                            progression_region,  # Always use the progression region as detected
                                             new_level,
                                             new_prestige
                                         )
@@ -315,9 +350,20 @@ class StreamManager:
                                         except:
                                             pass
                                     
-                                    # Save both frames
-                                    cv2.imwrite(annotated_frame_path, annotated_frame)
-                                    cv2.imwrite(original_frame_path, frame)  # Save original non-annotated frame
+                                    # Save both frames to disk
+                                    try:
+                                        success_annotated = cv2.imwrite(annotated_frame_path, annotated_frame)
+                                        success_original = cv2.imwrite(original_frame_path, frame)
+                                        if not success_annotated or not success_original:
+                                            print(f"Stream {stream_id}: WARNING - Failed to save frames to disk")
+                                            print(f"  Annotated: {success_annotated}, Original: {success_original}")
+                                            print(f"  Paths: {annotated_frame_path}, {original_frame_path}")
+                                        else:
+                                            print(f"Stream {stream_id}: Successfully saved frames to disk")
+                                    except Exception as e:
+                                        print(f"Stream {stream_id}: ERROR saving frames - {e}")
+                                        import traceback
+                                        traceback.print_exc()
                                     
                                     # Store annotated frame and OCR logs only for successful detections
                                     with stream_info.frame_lock:
@@ -327,15 +373,23 @@ class StreamManager:
                                     
                                     # Always save frame and OCR logs to database for persistence
                                     # Update database with frame paths and OCR logs (even if level hasn't changed)
-                                    data = self.database._load_data()
-                                    stream_key = str(stream_id)
-                                    if stream_key in data['streams']:
-                                        stream_data = data['streams'][stream_key]
-                                        stream_data['last_annotated_frame'] = annotated_frame_path
-                                        stream_data['last_original_frame'] = original_frame_path
-                                        stream_data['last_ocr_logs'] = [ocr_log_entry]
-                                        stream_data['last_active'] = datetime.now().isoformat()
-                                        self.database._save_data(data)
+                                    try:
+                                        data = self.database._load_data()
+                                        stream_key = str(stream_id)
+                                        if stream_key in data['streams']:
+                                            stream_data = data['streams'][stream_key]
+                                            stream_data['last_annotated_frame'] = annotated_frame_path
+                                            stream_data['last_original_frame'] = original_frame_path
+                                            stream_data['last_ocr_logs'] = [ocr_log_entry]
+                                            stream_data['last_active'] = datetime.now().isoformat()
+                                            self.database._save_data(data)
+                                            print(f"Stream {stream_id}: Successfully saved frame paths and OCR logs to database")
+                                        else:
+                                            print(f"Stream {stream_id}: WARNING - Stream {stream_key} not found in database")
+                                    except Exception as e:
+                                        print(f"Stream {stream_id}: ERROR saving to database - {e}")
+                                        import traceback
+                                        traceback.print_exc()
                                     
                                     # Only update level/prestige if different
                                     if (new_prestige != stream_info.prestige or 

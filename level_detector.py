@@ -1253,6 +1253,20 @@ class LevelDetector:
         if not regions:
             return annotated_frame
         
+        # Track which region is the progression screen for drawing level/prestige boxes
+        progression_region = None
+        if detected_region is not None and len(detected_region) == 4:
+            # Find the matching region
+            for region in regions:
+                if len(region) == 4 and tuple(region) == tuple(detected_region):
+                    progression_region = region
+                    break
+        
+        # If no detected region matches, use first region if we have level/prestige values
+        # This ensures saved annotated frames always show all annotation boxes
+        if progression_region is None and (level is not None or prestige is not None) and len(regions) > 0:
+            progression_region = regions[0]
+        
         for i, region in enumerate(regions):
             if len(region) != 4:
                 continue
@@ -1263,6 +1277,10 @@ class LevelDetector:
             is_detected = (detected_region is not None and 
                           len(detected_region) == 4 and
                           tuple(region) == tuple(detected_region))
+            
+            # Also check if this is the progression region we identified
+            is_progression = (progression_region is not None and 
+                            tuple(region) == tuple(progression_region))
             
             # Use green for detected region, blue for progression screen, red for others
             if is_detected:
@@ -1286,7 +1304,8 @@ class LevelDetector:
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
             
             # If this is the progression screen and we detected level/prestige, draw sub-regions
-            if is_detected and (level is not None or prestige is not None):
+            # Always draw level/prestige boxes on the progression region if we have values
+            if is_progression and (level is not None or prestige is not None):
                 # Draw level extraction region using config
                 level_region_x = x + int(w * self.level_region_config['x_percent'])
                 level_region_y = y + int(h * self.level_region_config['y_percent'])
