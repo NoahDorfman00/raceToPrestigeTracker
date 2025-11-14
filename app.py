@@ -119,6 +119,65 @@ MAX_STREAMS = int(os.environ.get('MAX_STREAMS', 5))  # Default to 5 streams for 
 if not level_detector.tesseract_available:
     print("WARNING: Tesseract OCR is not installed. Detection will not work.")
 
+# Flag to prevent double initialization
+_initialized = False
+
+def initialize_app():
+    """Initialize the application - restores streams and starts live check."""
+    global _initialized
+    if _initialized:
+        return
+    _initialized = True
+    
+    print("Initializing StreamWatcher application...")
+    print(f"Multi-stream monitoring enabled (max {MAX_STREAMS} streams)")
+    
+    # Check if template is loaded
+    if level_detector.template_gray is not None:
+        print(f"✓ Template loaded: {level_detector.template_path}")
+    else:
+        print(f"⚠ Warning: Template not found at {template_path}")
+        print("   Please ensure progression_template.png exists in template_images/")
+    
+    # Check OCR availability
+    if level_detector.tesseract_available:
+        print("✓ Tesseract OCR available")
+    else:
+        print("⚠ Tesseract OCR not available - detection will not work")
+    
+    if level_detector.easyocr_available:
+        print("✓ EasyOCR available (better for unusual fonts)")
+    
+    # Load existing streams from database
+    existing_streams = database.get_all_active_streams()
+    if existing_streams:
+        print(f"✓ Found {len(existing_streams)} existing stream(s) in database")
+        for stream in existing_streams:
+            print(f"  - {stream.get('streamer_name', stream.get('stream_url'))}: P{stream.get('prestige', 0)} L{stream.get('level', 0)}")
+            # Restore streams to monitoring
+            try:
+                # Use the stream ID from database to maintain consistency
+                stream_id = stream.get('id')
+                if stream_id:
+                    # Check if stream already exists in manager
+                    existing_status = stream_manager.get_stream_status(stream_id)
+                    if not existing_status:
+                        # Stream not in manager, add it
+                        stream_manager.add_stream(stream['stream_url'], stream.get('streamer_name'))
+                    else:
+                        print(f"    Stream {stream_id} already active in manager")
+            except Exception as e:
+                print(f"  ⚠ Failed to restore stream {stream.get('id')}: {e}")
+                import traceback
+                traceback.print_exc()
+    
+    # Start live check thread to periodically check if streams are live
+    stream_manager.start_live_check()
+    print("✓ Live stream checking enabled (checks every 60 seconds)")
+
+# Initialize the application when module is imported (works with gunicorn)
+# This ensures streams are restored and live check starts in production
+initialize_app()
 
 # Detection is now handled automatically by StreamManager for each stream
 
@@ -716,52 +775,7 @@ def test_video():
 
 
 if __name__ == '__main__':
-    print("Starting Race to Master Prestige Leaderboard...")
-    print(f"Multi-stream monitoring enabled (max {MAX_STREAMS} streams)")
-    
-    # Check if template is loaded
-    if level_detector.template_gray is not None:
-        print(f"✓ Template loaded: {level_detector.template_path}")
-    else:
-        print(f"⚠ Warning: Template not found at {template_path}")
-        print("   Please ensure progression_template.png exists in template_images/")
-    
-    # Check OCR availability
-    if level_detector.tesseract_available:
-        print("✓ Tesseract OCR available")
-    else:
-        print("⚠ Tesseract OCR not available - detection will not work")
-    
-    if level_detector.easyocr_available:
-        print("✓ EasyOCR available (better for unusual fonts)")
-    
-    # Load existing streams from database
-    existing_streams = database.get_all_active_streams()
-    if existing_streams:
-        print(f"✓ Found {len(existing_streams)} existing stream(s) in database")
-        for stream in existing_streams:
-            print(f"  - {stream.get('streamer_name', stream.get('stream_url'))}: P{stream.get('prestige', 0)} L{stream.get('level', 0)}")
-            # Restore streams to monitoring
-            try:
-                # Use the stream ID from database to maintain consistency
-                stream_id = stream.get('id')
-                if stream_id:
-                    # Check if stream already exists in manager
-                    existing_status = stream_manager.get_stream_status(stream_id)
-                    if not existing_status:
-                        # Stream not in manager, add it
-                        stream_manager.add_stream(stream['stream_url'], stream.get('streamer_name'))
-                    else:
-                        print(f"    Stream {stream_id} already active in manager")
-            except Exception as e:
-                print(f"  ⚠ Failed to restore stream {stream.get('id')}: {e}")
-                import traceback
-                traceback.print_exc()
-    
-    # Start live check thread to periodically check if streams are live
-    stream_manager.start_live_check()
-    print("✓ Live stream checking enabled (checks every 60 seconds)")
-    
+    # Development mode - initialization already happened above
     port = int(os.environ.get('PORT', 5001))
     debug = os.environ.get('FLASK_ENV') == 'development'
     

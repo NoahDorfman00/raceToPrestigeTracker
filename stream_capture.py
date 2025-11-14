@@ -7,6 +7,7 @@ import threading
 import queue
 import time
 import os
+import shutil
 import numpy as np
 from typing import Optional, Generator
 
@@ -34,14 +35,39 @@ class StreamCapture:
             url = f'https://www.twitch.tv/{url}'
         return url
     
+    def _find_streamlink(self) -> Optional[str]:
+        """Find streamlink executable."""
+        # First try shutil.which which uses PATH
+        streamlink_path = shutil.which('streamlink')
+        if streamlink_path:
+            return streamlink_path
+        
+        # Fallback to known locations
+        possible_paths = [
+            '/home/noah/raceToPrestigeTracker/venv/bin/streamlink',
+            '/usr/local/bin/streamlink',
+            '/usr/bin/streamlink',
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path) and os.access(path, os.X_OK):
+                return path
+        
+        return None
+    
     def _capture_frames(self):
         """Internal method to capture frames in a separate thread."""
         url = self._normalize_url(self.stream_url)
         cap = None
         
         try:
+            # Find streamlink
+            streamlink_path = self._find_streamlink()
+            if not streamlink_path:
+                raise Exception("streamlink not found. Please install streamlink: pip install streamlink")
+            
             # Get the stream URL from streamlink
-            cmd_get_url = ['streamlink', '--stream-url', url, 'best']
+            cmd_get_url = [streamlink_path, '--stream-url', url, 'best']
             result = subprocess.run(
                 cmd_get_url,
                 stdout=subprocess.PIPE,

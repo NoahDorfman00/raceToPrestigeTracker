@@ -5,6 +5,7 @@ import threading
 import time
 import subprocess
 import os
+import shutil
 from typing import Dict, Optional, List
 from datetime import datetime
 from stream_capture import StreamCapture
@@ -130,6 +131,26 @@ class StreamManager:
                 del self.streams[stream_id]
                 self.database.delete_stream(stream_id)
     
+    def _find_streamlink(self) -> Optional[str]:
+        """Find streamlink executable."""
+        # First try shutil.which which uses PATH
+        streamlink_path = shutil.which('streamlink')
+        if streamlink_path:
+            return streamlink_path
+        
+        # Fallback to known locations
+        possible_paths = [
+            '/home/noah/raceToPrestigeTracker/venv/bin/streamlink',
+            '/usr/local/bin/streamlink',
+            '/usr/bin/streamlink',
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path) and os.access(path, os.X_OK):
+                return path
+        
+        return None
+    
     def _check_stream_live(self, stream_url: str) -> bool:
         """
         Check if a stream is currently live (lightweight check).
@@ -146,9 +167,15 @@ class StreamManager:
             if not url.startswith('http'):
                 url = f'https://www.twitch.tv/{url}'
             
+            # Find streamlink
+            streamlink_path = self._find_streamlink()
+            if not streamlink_path:
+                print(f"ERROR: streamlink not found. Cannot check if stream is live: {url}")
+                return False
+            
             # Use streamlink to check if stream is available (lightweight)
             # This doesn't open the full stream, just checks availability
-            cmd = ['streamlink', '--json', url, 'best']
+            cmd = [streamlink_path, '--json', url, 'best']
             result = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -157,24 +184,40 @@ class StreamManager:
                 text=True
             )
             
-            # If streamlink succeeds, the stream is live
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, subprocess.SubprocessError, Exception) as e:
-            # Any error means stream is not live or not accessible
+            # Log the result for debugging
+            if result.returncode == 0:
+                print(f"✓ Stream is LIVE: {url}")
+                return True
+            else:
+                # Only log if it's not a simple "not live" error
+                if result.stderr and 'No playable streams found' not in result.stderr:
+                    print(f"✗ Stream check failed for {url}: {result.stderr[:200]}")
+                return False
+        except subprocess.TimeoutExpired:
+            print(f"✗ Stream check TIMED OUT: {stream_url}")
+            return False
+        except Exception as e:
+            print(f"✗ Error checking stream ({stream_url}): {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def _start_stream_internal(self, stream_id: int):
         """Internal method to start a stream."""
         stream_info = self.streams[stream_id]
         
+        print(f"Attempting to start stream {stream_id}: {stream_info.stream_url}")
+        
         # Check if stream is live before starting capture
-        if not self._check_stream_live(stream_info.stream_url):
+        is_live = self._check_stream_live(stream_info.stream_url)
+        if not is_live:
             print(f"Stream {stream_id} ({stream_info.streamer_name or stream_info.stream_url}) is not live, skipping capture")
             stream_info.error = "Stream is not live"
             return
         
         try:
             # Create stream capture
+            print(f"Stream {stream_id} is live, starting capture...")
             stream_info.stream_capture = StreamCapture(stream_info.stream_url)
             stream_info.stream_capture.start()
             
@@ -187,11 +230,13 @@ class StreamManager:
             )
             stream_info.detection_thread.start()
             
-            print(f"Started monitoring stream {stream_id}: {stream_info.stream_url}")
+            print(f"✓ Started monitoring stream {stream_id}: {stream_info.stream_url}")
         except Exception as e:
             stream_info.error = str(e)
             stream_info.is_running = False
-            print(f"Error starting stream {stream_id}: {e}")
+            print(f"✗ Error starting stream {stream_id}: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _stop_stream_internal(self, stream_id: int):
         """Internal method to stop a stream."""
