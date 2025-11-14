@@ -16,4 +16,6 @@ ENV/
 .idea/
 template_images/
 streams_data.json
+annotated_frames/
+firebase-service-account.json
 

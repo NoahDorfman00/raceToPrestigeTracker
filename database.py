@@ -11,15 +11,23 @@ from datetime import datetime
 class StreamDatabase:
     """Manages JSON file storage for stream data."""
     
-    def __init__(self, data_file: str = 'streams_data.json'):
+    def __init__(self, data_file: str = 'streams_data.json', frames_dir: str = 'annotated_frames'):
         """
         Initialize file storage.
         
         Args:
             data_file: Path to JSON data file
+            frames_dir: Directory to store annotated frames
         """
         self.data_file = data_file
+        self.frames_dir = frames_dir
         self._init_data_file()
+        self._init_frames_dir()
+    
+    def _init_frames_dir(self):
+        """Create frames directory if it doesn't exist."""
+        if not os.path.exists(self.frames_dir):
+            os.makedirs(self.frames_dir)
     
     def _init_data_file(self):
         """Create data file if it doesn't exist."""
@@ -84,15 +92,21 @@ class StreamDatabase:
         self._save_data(data)
         return stream_id
     
-    def record_level_snapshot(self, stream_id: int, prestige: int, level: int) -> bool:
+    def record_level_snapshot(self, stream_id: int, prestige: int, level: int, 
+                             annotated_frame_path: Optional[str] = None,
+                             original_frame_path: Optional[str] = None,
+                             ocr_logs: Optional[List[Dict]] = None) -> bool:
         """
-        Record a new level/prestige snapshot.
+        Record a new level/prestige snapshot with annotated frame and OCR logs.
         Only records if it's different from the last snapshot.
         
         Args:
             stream_id: Stream ID
             prestige: Prestige level
             level: Level number
+            annotated_frame_path: Path to saved annotated frame image
+            original_frame_path: Path to saved original (non-annotated) frame image
+            ocr_logs: List of OCR log entries
             
         Returns:
             True if snapshot was recorded, False if it was a duplicate
@@ -115,8 +129,46 @@ class StreamDatabase:
         stream_data['last_detected'] = datetime.now().isoformat()
         stream_data['last_active'] = datetime.now().isoformat()
         
+        # Save annotated frame path, original frame path, and OCR logs
+        if annotated_frame_path:
+            stream_data['last_annotated_frame'] = annotated_frame_path
+        if original_frame_path:
+            stream_data['last_original_frame'] = original_frame_path
+        if ocr_logs:
+            stream_data['last_ocr_logs'] = ocr_logs
+        
         self._save_data(data)
         return True
+    
+    def get_last_annotated_frame_path(self, stream_id: int) -> Optional[str]:
+        """Get path to last annotated frame for a stream."""
+        data = self._load_data()
+        stream_key = str(stream_id)
+        
+        if stream_key not in data['streams']:
+            return None
+        
+        return data['streams'][stream_key].get('last_annotated_frame')
+    
+    def get_last_original_frame_path(self, stream_id: int) -> Optional[str]:
+        """Get path to last original (non-annotated) frame for a stream."""
+        data = self._load_data()
+        stream_key = str(stream_id)
+        
+        if stream_key not in data['streams']:
+            return None
+        
+        return data['streams'][stream_key].get('last_original_frame')
+    
+    def get_last_ocr_logs(self, stream_id: int) -> List[Dict]:
+        """Get last OCR logs for a stream."""
+        data = self._load_data()
+        stream_key = str(stream_id)
+        
+        if stream_key not in data['streams']:
+            return []
+        
+        return data['streams'][stream_key].get('last_ocr_logs', [])
     
     def get_latest_level(self, stream_id: int) -> Optional[Dict]:
         """

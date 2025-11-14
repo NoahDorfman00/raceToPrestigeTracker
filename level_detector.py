@@ -34,8 +34,13 @@ class LevelDetector:
         # Use PSM 7 for single line of text (level numbers are large and isolated)
         # Use PSM 8 for single word
         # Use PSM 6 for single uniform block of text
+        # Level range: 1-55, Prestige range: 0-10
         self.tesseract_config_level = r'--oem 3 --psm 8 -c tessedit_char_whitelist=0123456789'  # For large level numbers
         self.tesseract_config_text = r'--oem 3 --psm 6'  # For rank/prestige text
+        
+        # Valid ranges for validation
+        self.valid_level_range = (1, 55)
+        self.valid_prestige_range = (0, 10)
         self.tesseract_available = self._check_tesseract()
         
         # Initialize EasyOCR if available (better for unusual fonts)
@@ -569,10 +574,14 @@ class LevelDetector:
                 # Clean and extract numbers
                 numbers = re.findall(r'\d+', text)
                 if numbers:
-                    valid_numbers = [int(n) for n in numbers if 1 <= int(n) <= 1000]
+                    # Level must be between 1 and 55
+                    # Use valid range from class constants
+                    min_level, max_level = self.valid_level_range
+                    valid_numbers = [int(n) for n in numbers if min_level <= int(n) <= max_level]
                     if valid_numbers:
-                        # Try the largest number first, but also consider all numbers
-                        for num in sorted(valid_numbers, reverse=True):
+                        # Prefer numbers closer to the middle of the range (more likely to be correct)
+                        # But also consider all valid numbers
+                        for num in sorted(valid_numbers, key=lambda x: abs(x - (min_level + max_level) // 2)):
                             results.append(num)
             except Exception as e:
                 print(f"Error in OCR method {i+1}: {e}")
@@ -690,7 +699,8 @@ class LevelDetector:
                         
                         for num_str in numbers:
                             num = int(num_str)
-                            if 0 <= num <= 20:  # Reasonable prestige range
+                            min_prestige, max_prestige = self.valid_prestige_range
+                            if min_prestige <= num <= max_prestige:
                                 numbers_found.append((num, (x, y, w, h)))
                                 
                                 # If we have prestige text bbox, check if number is nearby
@@ -879,21 +889,31 @@ class LevelDetector:
                         text_upper = text_clean.upper()
                         
                         if is_prestige or 'PRESTIGE' in text_upper:
-                            # Look for numbers in EasyOCR results near this text
+                            # First, check if the number is in the same text (e.g., "PRESTIGE 1")
+                            numbers_in_text = re.findall(r'\d+', text_clean)
+                            if numbers_in_text:
+                                num = int(numbers_in_text[0])
+                                min_prestige, max_prestige = self.valid_prestige_range
+                                if min_prestige <= num <= max_prestige:
+                                    print(f"EasyOCR found Prestige: {num} (in same text)")
+                                    return num, text_clean
+                            
+                            # Look for numbers in other EasyOCR results near this text
                             for other_text, other_conf, other_bbox in easyocr_results:
                                 if other_conf > 0.5:
                                     # Check if this is a number near prestige text
                                     numbers = re.findall(r'\d+', other_text)
                                     if numbers:
                                         num = int(numbers[0])
-                                        if 0 <= num <= 20:
+                                        min_prestige, max_prestige = self.valid_prestige_range
+                                        if min_prestige <= num <= max_prestige:
                                             # Check if number is spatially near prestige text
                                             px, py, pw, ph = bbox
                                             nx, ny, nw, nh = other_bbox
                                             # Number should be to the right of prestige text
                                             if (nx >= px + pw - 20 and nx <= px + pw + 150 and
                                                 abs(ny - py) < max(ph, nh) * 2):
-                                                print(f"EasyOCR found Prestige: {num}")
+                                                print(f"EasyOCR found Prestige: {num} (in nearby text)")
                                                 return num, text_clean
                             
                             # If prestige found but no nearby number, try extracting numbers with Tesseract
@@ -1016,7 +1036,8 @@ class LevelDetector:
                 
                 if match:
                     prestige_num = int(match.group(1))
-                    if 0 <= prestige_num <= 20:  # Reasonable prestige range
+                    min_prestige, max_prestige = self.valid_prestige_range
+                    if min_prestige <= prestige_num <= max_prestige:
                         print(f"Found Prestige: {prestige_num}")
                         return prestige_num, text.strip()
                 
@@ -1026,7 +1047,8 @@ class LevelDetector:
                     numbers = re.findall(r'\d+', text)
                     if numbers:
                         prestige_num = int(numbers[0])
-                        if 0 <= prestige_num <= 20:
+                        min_prestige, max_prestige = self.valid_prestige_range
+                        if min_prestige <= prestige_num <= max_prestige:
                             print(f"Found Prestige (likely match, near number): {prestige_num}")
                             return prestige_num, text.strip()
                     
@@ -1187,12 +1209,21 @@ class LevelDetector:
         regions = [progression_region]
 
         if level is not None:
-            result = {
-                'level': level,
-                'prestige': prestige if prestige is not None else 0,
-                'prestige_ocr_text': prestige_ocr_text  # Debug: raw OCR text
-            }
-            return result, regions
+            # Validate and clamp values to valid ranges using class constants
+            min_level, max_level = self.valid_level_range
+            min_prestige, max_prestige = self.valid_prestige_range
+            
+            validated_level = max(min_level, min(max_level, level)) if level is not None else None
+            validated_prestige = max(min_prestige, min(max_prestige, prestige)) if prestige is not None else 0
+            
+            # Only return result if level is in valid range
+            if validated_level is not None and min_level <= validated_level <= max_level:
+                result = {
+                    'level': validated_level,
+                    'prestige': validated_prestige,
+                    'prestige_ocr_text': prestige_ocr_text  # Debug: raw OCR text
+                }
+                return result, regions
 
         return None, regions
     

@@ -8,4 +8,5 @@ numpy==1.26.2
 pandas>=2.0.0  # Required by pytesseract, compatible with numpy 1.26.2
 requests==2.31.0
 easyocr>=1.7.0  # Optional: Better OCR for unusual fonts (falls back to Tesseract if not available)
+firebase-admin>=6.0.0  # For Firebase authentication
 

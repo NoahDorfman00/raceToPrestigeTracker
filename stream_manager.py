@@ -3,7 +3,10 @@ Stream manager for handling multiple streams simultaneously.
 """
 import threading
 import time
-from typing import Dict, Optional
+import subprocess
+import os
+from typing import Dict, Optional, List
+from datetime import datetime
 from stream_capture import StreamCapture
 from level_detector import LevelDetector
 from database import StreamDatabase
@@ -22,6 +25,7 @@ class StreamInfo:
         self.detection_thread: Optional[threading.Thread] = None
         self.is_running = False
         self.latest_frame: Optional[np.ndarray] = None
+        self.latest_annotated_frame: Optional[np.ndarray] = None  # Frame with detection boxes drawn
         self.prestige = 0
         self.level = 0
         self.last_detected: Optional[float] = None
@@ -29,6 +33,7 @@ class StreamInfo:
         self.frame_lock = threading.Lock()
         self.detection_regions = []
         self.detected_region = None
+        self.ocr_logs = []  # OCR logs for the most recent successful detection
 
 
 class StreamManager:
@@ -47,6 +52,9 @@ class StreamManager:
         self.streams: Dict[int, StreamInfo] = {}
         self.lock = threading.Lock()
         self.detection_cooldown = 2.0  # Seconds between detections per stream
+        self.live_check_interval = 60.0  # Check if streams are live every 60 seconds
+        self.live_check_thread: Optional[threading.Thread] = None
+        self.live_check_running = False
     
     def add_stream(self, stream_url: str, streamer_name: Optional[str] = None) -> int:
         """
@@ -82,6 +90,20 @@ class StreamManager:
                 stream_info.prestige = latest['prestige']
                 stream_info.level = latest['level']
             
+            # Load saved annotated frame and OCR logs
+            saved_frame_path = self.database.get_last_annotated_frame_path(stream_id)
+            if saved_frame_path and os.path.exists(saved_frame_path):
+                try:
+                    saved_frame = cv2.imread(saved_frame_path)
+                    if saved_frame is not None:
+                        stream_info.latest_annotated_frame = saved_frame
+                except Exception as e:
+                    print(f"Failed to load saved frame for stream {stream_id}: {e}")
+            
+            saved_ocr_logs = self.database.get_last_ocr_logs(stream_id)
+            if saved_ocr_logs:
+                stream_info.ocr_logs = saved_ocr_logs
+            
             self.streams[stream_id] = stream_info
             
             # Start the stream in a background thread to avoid blocking
@@ -108,9 +130,48 @@ class StreamManager:
                 del self.streams[stream_id]
                 self.database.delete_stream(stream_id)
     
+    def _check_stream_live(self, stream_url: str) -> bool:
+        """
+        Check if a stream is currently live (lightweight check).
+        
+        Args:
+            stream_url: Stream URL or username
+            
+        Returns:
+            True if stream is live, False otherwise
+        """
+        try:
+            # Normalize URL
+            url = stream_url.strip()
+            if not url.startswith('http'):
+                url = f'https://www.twitch.tv/{url}'
+            
+            # Use streamlink to check if stream is available (lightweight)
+            # This doesn't open the full stream, just checks availability
+            cmd = ['streamlink', '--json', url, 'best']
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+                text=True
+            )
+            
+            # If streamlink succeeds, the stream is live
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError, Exception) as e:
+            # Any error means stream is not live or not accessible
+            return False
+    
     def _start_stream_internal(self, stream_id: int):
         """Internal method to start a stream."""
         stream_info = self.streams[stream_id]
+        
+        # Check if stream is live before starting capture
+        if not self._check_stream_live(stream_info.stream_url):
+            print(f"Stream {stream_id} ({stream_info.streamer_name or stream_info.stream_url}) is not live, skipping capture")
+            stream_info.error = "Stream is not live"
+            return
         
         try:
             # Create stream capture
@@ -175,16 +236,117 @@ class StreamManager:
                                     stream_info.detection_regions = regions
                                 
                                 if result:
+                                    # Only save annotated frame and OCR logs when progression screen is detected
                                     new_prestige = result.get('prestige', 0)
                                     new_level = result.get('level')
+                                    ocr_text = result.get('prestige_ocr_text', '')
                                     
-                                    # Only update if different
+                                    # Validate that level/prestige hasn't gone down
+                                    # Calculate total progression: prestige * 1000 + level
+                                    current_total = stream_info.prestige * 1000 + (stream_info.level or 0)
+                                    new_total = new_prestige * 1000 + (new_level or 0)
+                                    
+                                    # Check if this is a valid progression
+                                    # Allow if:
+                                    # 1. Total progression increased, OR
+                                    # 2. Prestige increased (rollover case: P1 L55 -> P2 L1)
+                                    is_valid_progression = False
+                                    
+                                    if new_total > current_total:
+                                        # Normal progression: total level increased
+                                        is_valid_progression = True
+                                    elif new_prestige > stream_info.prestige:
+                                        # Prestige rollover: prestige increased (e.g., P1 L55 -> P2 L1)
+                                        # This is valid even if total is slightly lower
+                                        is_valid_progression = True
+                                    elif new_total == current_total:
+                                        # Same level - this is okay, might be re-detection
+                                        is_valid_progression = True
+                                    else:
+                                        # Level went down without prestige increase - invalid
+                                        print(f"Stream {stream_id}: Rejecting invalid progression - "
+                                              f"Current: P{stream_info.prestige} L{stream_info.level} ({current_total}), "
+                                              f"Detected: P{new_prestige} L{new_level} ({new_total})")
+                                        is_valid_progression = False
+                                    
+                                    if not is_valid_progression:
+                                        # Skip this detection - it's invalid
+                                        continue
+                                    
+                                    # Create annotated frame for display
+                                    annotated_frame = frame.copy()
+                                    if regions:
+                                        annotated_frame = self.level_detector.draw_detection_regions(
+                                            annotated_frame,
+                                            regions,
+                                            stream_info.detected_region if hasattr(stream_info, 'detected_region') else None,
+                                            new_level,
+                                            new_prestige
+                                        )
+                                    
+                                    # Store OCR logs for this detection
+                                    ocr_log_entry = {
+                                        'timestamp': time.time(),
+                                        'prestige': new_prestige,
+                                        'level': new_level,
+                                        'ocr_text': ocr_text,
+                                        'detected': True
+                                    }
+                                    
+                                    # Save both annotated and original frames to disk
+                                    timestamp = int(time.time())
+                                    annotated_filename = f"stream_{stream_id}_{timestamp}_annotated.jpg"
+                                    original_filename = f"stream_{stream_id}_{timestamp}_original.jpg"
+                                    annotated_frame_path = os.path.join(self.database.frames_dir, annotated_filename)
+                                    original_frame_path = os.path.join(self.database.frames_dir, original_filename)
+                                    
+                                    # Remove old frames if they exist
+                                    old_annotated_path = self.database.get_last_annotated_frame_path(stream_id)
+                                    if old_annotated_path and os.path.exists(old_annotated_path):
+                                        try:
+                                            os.remove(old_annotated_path)
+                                        except:
+                                            pass
+                                    
+                                    old_original_path = self.database.get_last_original_frame_path(stream_id)
+                                    if old_original_path and os.path.exists(old_original_path):
+                                        try:
+                                            os.remove(old_original_path)
+                                        except:
+                                            pass
+                                    
+                                    # Save both frames
+                                    cv2.imwrite(annotated_frame_path, annotated_frame)
+                                    cv2.imwrite(original_frame_path, frame)  # Save original non-annotated frame
+                                    
+                                    # Store annotated frame and OCR logs only for successful detections
+                                    with stream_info.frame_lock:
+                                        stream_info.latest_annotated_frame = annotated_frame.copy()
+                                        # Store OCR logs for this detection (replace previous logs)
+                                        stream_info.ocr_logs = [ocr_log_entry]
+                                    
+                                    # Always save frame and OCR logs to database for persistence
+                                    # Update database with frame paths and OCR logs (even if level hasn't changed)
+                                    data = self.database._load_data()
+                                    stream_key = str(stream_id)
+                                    if stream_key in data['streams']:
+                                        stream_data = data['streams'][stream_key]
+                                        stream_data['last_annotated_frame'] = annotated_frame_path
+                                        stream_data['last_original_frame'] = original_frame_path
+                                        stream_data['last_ocr_logs'] = [ocr_log_entry]
+                                        stream_data['last_active'] = datetime.now().isoformat()
+                                        self.database._save_data(data)
+                                    
+                                    # Only update level/prestige if different
                                     if (new_prestige != stream_info.prestige or 
                                         new_level != stream_info.level):
                                         
-                                        # Record in database
+                                        # Record level snapshot in database
                                         self.database.record_level_snapshot(
-                                            stream_id, new_prestige, new_level
+                                            stream_id, new_prestige, new_level,
+                                            annotated_frame_path=annotated_frame_path,
+                                            original_frame_path=original_frame_path,
+                                            ocr_logs=[ocr_log_entry]
                                         )
                                         
                                         # Update stream info
@@ -194,12 +356,13 @@ class StreamManager:
                                         
                                         print(f"Stream {stream_id} ({stream_info.streamer_name or stream_info.stream_url}): "
                                               f"Prestige {new_prestige}, Level {new_level}")
-                                        
-                                        # Update detected region
-                                        if regions and len(regions) > 0:
-                                            with stream_info.frame_lock:
-                                                stream_info.detected_region = regions[0]
+                                    
+                                    # Update detected region
+                                    if regions and len(regions) > 0:
+                                        with stream_info.frame_lock:
+                                            stream_info.detected_region = regions[0]
                                 else:
+                                    # No detection - clear detected region but keep last annotated frame
                                     with stream_info.frame_lock:
                                         stream_info.detected_region = None
                             except Exception as e:
@@ -283,7 +446,90 @@ class StreamManager:
             with stream_info.frame_lock:
                 return stream_info.detection_regions, stream_info.detected_region
     
+    def get_annotated_frame(self, stream_id: int) -> Optional[np.ndarray]:
+        """Get latest annotated frame for a stream."""
+        with self.lock:
+            if stream_id not in self.streams:
+                return None
+            
+            stream_info = self.streams[stream_id]
+            with stream_info.frame_lock:
+                return stream_info.latest_annotated_frame.copy() if stream_info.latest_annotated_frame is not None else None
+    
+    def get_ocr_logs(self, stream_id: int) -> List[Dict]:
+        """Get recent OCR logs for a stream."""
+        with self.lock:
+            if stream_id not in self.streams:
+                return []
+            
+            stream_info = self.streams[stream_id]
+            with stream_info.frame_lock:
+                return stream_info.ocr_logs.copy()
+    
     def get_leaderboard(self, limit: int = 50) -> list:
         """Get leaderboard from database."""
         return self.database.get_leaderboard(limit)
+    
+    def _live_check_loop(self):
+        """Background thread to periodically check if streams are live."""
+        while self.live_check_running:
+            try:
+                # Get all stream IDs
+                stream_ids = []
+                with self.lock:
+                    stream_ids = list(self.streams.keys())
+                
+                for stream_id in stream_ids:
+                    with self.lock:
+                        if stream_id not in self.streams:
+                            continue
+                        stream_info = self.streams[stream_id]
+                    
+                    # Check if stream is live
+                    is_live = self._check_stream_live(stream_info.stream_url)
+                    
+                    with self.lock:
+                        if stream_id not in self.streams:
+                            continue
+                        stream_info = self.streams[stream_id]
+                        
+                        if is_live:
+                            # Stream is live - start capture if not already running
+                            if not stream_info.is_running:
+                                print(f"Stream {stream_id} is now live, starting capture")
+                                stream_info.error = None
+                                # Start in background to avoid blocking
+                                threading.Thread(
+                                    target=self._start_stream_internal,
+                                    args=(stream_id,),
+                                    daemon=True
+                                ).start()
+                        else:
+                            # Stream is not live - stop capture if running
+                            if stream_info.is_running:
+                                print(f"Stream {stream_id} is no longer live, stopping capture")
+                                self._stop_stream_internal(stream_id)
+                                stream_info.error = "Stream is not live"
+                
+                # Sleep before next check
+                time.sleep(self.live_check_interval)
+            except Exception as e:
+                print(f"Error in live check loop: {e}")
+                time.sleep(self.live_check_interval)
+    
+    def start_live_check(self):
+        """Start the background thread that checks if streams are live."""
+        if self.live_check_running:
+            return
+        
+        self.live_check_running = True
+        self.live_check_thread = threading.Thread(target=self._live_check_loop, daemon=True)
+        self.live_check_thread.start()
+        print("Started live stream checking")
+    
+    def stop_live_check(self):
+        """Stop the background thread that checks if streams are live."""
+        self.live_check_running = False
+        if self.live_check_thread:
+            self.live_check_thread.join(timeout=2)
 

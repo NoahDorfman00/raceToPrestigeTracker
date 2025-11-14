@@ -1,5 +1,5 @@
 """
-Main Flask application for StreamWatcher.
+Main Flask application for Race to Master Prestige Leaderboard.
 """
 from flask import Flask, render_template, jsonify, request, Response
 from flask_cors import CORS
@@ -9,12 +9,100 @@ import cv2
 import numpy as np
 import os
 import json
+from functools import wraps
 from level_detector import LevelDetector
 from stream_manager import StreamManager
 from database import StreamDatabase
 
+# Firebase Admin SDK for token verification
+try:
+    import firebase_admin
+    from firebase_admin import credentials, auth
+    FIREBASE_AVAILABLE = True
+except ImportError:
+    FIREBASE_AVAILABLE = False
+    print("WARNING: firebase-admin not installed. Admin authentication will not work.")
+
 app = Flask(__name__)
 CORS(app)
+
+# Initialize Firebase Admin SDK
+firebase_app = None
+if FIREBASE_AVAILABLE:
+    try:
+        # Try to initialize with service account key from environment variable or file
+        # For production: Set FIREBASE_SERVICE_ACCOUNT_JSON environment variable with the JSON content
+        # For local dev: Use firebase-service-account.json file
+        service_account_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON')
+        
+        if service_account_json:
+            # Use environment variable (for production/deployment)
+            import json
+            cred_dict = json.loads(service_account_json)
+            cred = credentials.Certificate(cred_dict)
+            firebase_app = firebase_admin.initialize_app(cred)
+            print("✓ Firebase Admin SDK initialized (from environment variable)")
+        else:
+            # Try to load from file (for local development)
+            cred_path = os.path.join(os.path.dirname(__file__), 'firebase-service-account.json')
+            if os.path.exists(cred_path):
+                cred = credentials.Certificate(cred_path)
+                firebase_app = firebase_admin.initialize_app(cred)
+                print("✓ Firebase Admin SDK initialized (from file)")
+            else:
+                print("⚠ Firebase service account key not found.")
+                print("   For local dev: Add firebase-service-account.json to project root")
+                print("   For production: Set FIREBASE_SERVICE_ACCOUNT_JSON environment variable")
+    except Exception as e:
+        print(f"⚠ Firebase initialization failed: {e}")
+        print("   Admin authentication will not work until Firebase is configured.")
+
+# Authorized admin emails (whitelist)
+# Add your email addresses here to restrict admin access
+AUTHORIZED_ADMIN_EMAILS = [
+    'n.dorfman00@gmail.com',
+    # Add your authorized email addresses here
+    # Example: 'your-email@gmail.com',
+]
+
+def require_auth(f):
+    """Decorator to require Firebase authentication and authorized email."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not FIREBASE_AVAILABLE:
+            return jsonify({'error': 'Firebase Admin SDK not installed. Run: pip install firebase-admin'}), 503
+        
+        if firebase_app is None:
+            return jsonify({
+                'error': 'Firebase not configured',
+                'details': 'Firebase service account not configured. Set FIREBASE_SERVICE_ACCOUNT_JSON environment variable or add firebase-service-account.json file.'
+            }), 503
+        
+        # Get token from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'No authorization token provided'}), 401
+        
+        token = auth_header.split('Bearer ')[1]
+        
+        try:
+            # Verify the token
+            decoded_token = auth.verify_id_token(token)
+            user_email = decoded_token.get('email')
+            
+            # Check if email is authorized (if whitelist is configured)
+            if AUTHORIZED_ADMIN_EMAILS and user_email not in AUTHORIZED_ADMIN_EMAILS:
+                print(f"Unauthorized access attempt: {user_email}")
+                return jsonify({'error': 'Unauthorized: Your email is not authorized to access the admin panel'}), 403
+            
+            # Token is valid and authorized, continue with the request
+            request.user = decoded_token
+            return f(*args, **kwargs)
+        except Exception as e:
+            print(f"Token verification failed: {e}")
+            return jsonify({'error': 'Invalid or expired token'}), 401
+    
+    return decorated_function
 
 # Initialize components
 template_path = os.path.join('template_images', 'progression_template.png')
@@ -34,10 +122,38 @@ if not level_detector.tesseract_available:
 # Detection is now handled automatically by StreamManager for each stream
 
 
+@app.route('/favicon.ico')
+def favicon():
+    """Serve favicon with game controller emoji."""
+    # Return emoji as SVG favicon
+    from flask import Response
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+        <text y=".9em" font-size="90">🎮</text>
+    </svg>'''
+    return Response(svg, mimetype='image/svg+xml')
+
+@app.route('/social.png')
+def social_image():
+    """Serve social sharing image."""
+    # Try to serve from static folder, or return 404 if not found
+    from flask import send_from_directory
+    import os
+    static_path = os.path.join(os.path.dirname(__file__), 'static')
+    if os.path.exists(os.path.join(static_path, 'social.png')):
+        return send_from_directory(static_path, 'social.png')
+    else:
+        return jsonify({'error': 'Social image not found. Please create static/social.png'}), 404
+
 @app.route('/')
 def index():
-    """Serve the main webpage."""
+    """Serve the public leaderboard page."""
     return render_template('index.html')
+
+
+@app.route('/admin')
+def admin_page():
+    """Serve the admin page."""
+    return render_template('admin.html')
 
 
 @app.route('/test')
@@ -46,7 +162,48 @@ def test_page():
     return render_template('test.html')
 
 
+@app.route('/api/auth/verify', methods=['POST'])
+def verify_token():
+    """Verify Firebase ID token and check authorization."""
+    if not FIREBASE_AVAILABLE:
+        return jsonify({'error': 'Firebase Admin SDK not installed. Run: pip install firebase-admin'}), 503
+    
+    if firebase_app is None:
+        return jsonify({
+            'error': 'Firebase not configured',
+            'details': 'firebase-service-account.json file not found. Please add it to the project root.'
+        }), 503
+    
+    data = request.get_json()
+    token = data.get('token')
+    
+    if not token:
+        return jsonify({'error': 'No token provided'}), 400
+    
+    try:
+        decoded_token = auth.verify_id_token(token)
+        user_email = decoded_token.get('email')
+        
+        # Check if email is authorized (if whitelist is configured)
+        if AUTHORIZED_ADMIN_EMAILS and user_email not in AUTHORIZED_ADMIN_EMAILS:
+            print(f"Unauthorized access attempt: {user_email}")
+            return jsonify({
+                'valid': False,
+                'error': 'Unauthorized: Your email is not authorized to access the admin panel',
+                'email': user_email
+            }), 403
+        
+        return jsonify({
+            'valid': True,
+            'uid': decoded_token['uid'],
+            'email': user_email
+        })
+    except Exception as e:
+        print(f"Token verification failed: {e}")
+        return jsonify({'error': 'Invalid token', 'valid': False}), 401
+
 @app.route('/api/streams/add', methods=['POST'])
+@require_auth
 def add_stream():
     """Add a stream to the monitoring list."""
     data = request.get_json() or {}
@@ -77,6 +234,7 @@ def add_stream():
 
 
 @app.route('/api/streams/remove', methods=['POST'])
+@require_auth
 def remove_stream():
     """Remove a stream from the monitoring list."""
     data = request.get_json() or {}
@@ -137,14 +295,91 @@ def get_stream(stream_id):
     return jsonify(stream_info)
 
 
+@app.route('/api/streams/<int:stream_id>/annotated_frame', methods=['GET'])
+def get_annotated_frame(stream_id):
+    """Get the latest annotated frame for a stream."""
+    # Try to get from memory first
+    annotated_frame = stream_manager.get_annotated_frame(stream_id)
+    
+    # If not in memory, try to load from disk
+    if annotated_frame is None:
+        saved_frame_path = database.get_last_annotated_frame_path(stream_id)
+        if saved_frame_path and os.path.exists(saved_frame_path):
+            try:
+                annotated_frame = cv2.imread(saved_frame_path)
+            except Exception as e:
+                print(f"Failed to load saved frame: {e}")
+    
+    if annotated_frame is None:
+        return jsonify({'error': 'No annotated frame available'}), 404
+    
+    # Encode frame as JPEG
+    ret, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ret:
+        return jsonify({'error': 'Failed to encode frame'}), 500
+    
+    from flask import Response
+    return Response(buffer.tobytes(), mimetype='image/jpeg')
+
+
+@app.route('/api/streams/<int:stream_id>/original_frame', methods=['GET'])
+def get_original_frame(stream_id):
+    """Get the latest original (non-annotated) frame for a stream."""
+    # Try to load from disk
+    saved_frame_path = database.get_last_original_frame_path(stream_id)
+    if saved_frame_path and os.path.exists(saved_frame_path):
+        try:
+            original_frame = cv2.imread(saved_frame_path)
+            if original_frame is not None:
+                # Encode frame as JPEG
+                ret, buffer = cv2.imencode('.jpg', original_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                if ret:
+                    from flask import Response
+                    return Response(buffer.tobytes(), mimetype='image/jpeg')
+        except Exception as e:
+            print(f"Failed to load saved original frame: {e}")
+    
+    return jsonify({'error': 'No original frame available'}), 404
+
+
+@app.route('/api/streams/<int:stream_id>/ocr_logs', methods=['GET'])
+def get_ocr_logs(stream_id):
+    """Get recent OCR logs for a stream."""
+    # Try to get from memory first
+    logs = stream_manager.get_ocr_logs(stream_id)
+    
+    # If not in memory, try to load from database
+    if not logs:
+        logs = database.get_last_ocr_logs(stream_id)
+    
+    return jsonify({'logs': logs})
+
+
 @app.route('/api/leaderboard', methods=['GET'])
 def get_leaderboard():
     """Get leaderboard of all streams sorted by progression."""
     limit = request.args.get('limit', 50, type=int)
     leaderboard = stream_manager.get_leaderboard(limit)
+    
+    # Merge with runtime status to get is_active
+    manager_streams = {s['id']: s for s in stream_manager.get_all_streams_status()}
+    
+    # Enhance leaderboard entries with runtime status
+    enhanced_leaderboard = []
+    for entry in leaderboard:
+        stream_id = entry.get('id')
+        manager_status = manager_streams.get(stream_id, {})
+        
+        enhanced_entry = {
+            **entry,
+            'is_active': manager_status.get('is_active', False),
+            'stream_url': entry.get('stream_url', '')
+        }
+        enhanced_leaderboard.append(enhanced_entry)
+    
     return jsonify({
-        'leaderboard': leaderboard,
-        'count': len(leaderboard)
+        'leaderboard': enhanced_leaderboard,
+        'count': len(enhanced_leaderboard)
     })
 
 
@@ -309,6 +544,7 @@ def video_feed(stream_id: int = None):
 
 
 @app.route('/api/test_image', methods=['POST'])
+@require_auth
 def test_image():
     """Test detection on an uploaded image."""
     if 'file' not in request.files:
@@ -417,6 +653,7 @@ def test_image():
 
 
 @app.route('/api/test_video', methods=['POST'])
+@require_auth
 def test_video():
     """Test detection on an uploaded video file."""
     if 'file' not in request.files:
@@ -478,7 +715,7 @@ def test_video():
 
 
 if __name__ == '__main__':
-    print("Starting StreamWatcher...")
+    print("Starting Race to Master Prestige Leaderboard...")
     print(f"Multi-stream monitoring enabled (max {MAX_STREAMS} streams)")
     
     # Check if template is loaded
@@ -519,6 +756,10 @@ if __name__ == '__main__':
                 print(f"  ⚠ Failed to restore stream {stream.get('id')}: {e}")
                 import traceback
                 traceback.print_exc()
+    
+    # Start live check thread to periodically check if streams are live
+    stream_manager.start_live_check()
+    print("✓ Live stream checking enabled (checks every 60 seconds)")
     
     print("\nOpen http://localhost:5001 in your browser")
     print("API Endpoints:")
