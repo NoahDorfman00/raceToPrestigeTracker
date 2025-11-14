@@ -761,12 +761,15 @@ if __name__ == '__main__':
     stream_manager.start_live_check()
     print("✓ Live stream checking enabled (checks every 60 seconds)")
     
-    print("\nOpen http://localhost:5001 in your browser")
+    port = int(os.environ.get('PORT', 5001))
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    
+    print(f"\nOpen http://localhost:{port} in your browser")
     print("API Endpoints:")
     print("  POST /api/streams/add - Add a stream to monitor")
     print("  POST /api/streams/remove - Remove a stream")
     print("  GET  /api/streams - Get all streams")
     print("  GET  /api/leaderboard - Get leaderboard")
     print()
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(debug=debug, host='0.0.0.0', port=port)
 
