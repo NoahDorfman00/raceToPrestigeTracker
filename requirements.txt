@@ -1,3 +1,5 @@
+setuptools==60.10.0
+wheel>=0.41.0
 opencv-python==4.8.1.78
 pytesseract==0.3.10
 Pillow==10.1.0
@@ -7,7 +9,7 @@ streamlink==6.3.1
 numpy==1.26.2
 pandas>=2.0.0
 requests==2.31.0
-easyocr>=1.7.0
+easyocr==1.7.1
 firebase-admin>=6.0.0
 gunicorn>=21.2.0
 
