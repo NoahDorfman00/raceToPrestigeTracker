@@ -6,6 +6,7 @@ import subprocess
 import threading
 import queue
 import time
+import os
 import numpy as np
 from typing import Optional, Generator
 
@@ -63,12 +64,23 @@ class StreamCapture:
             # Minimize buffer to reduce latency
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
+            # Optionally resize frames to reduce memory usage (configurable via FRAME_SCALE env var)
+            # Default to 1.0 (no scaling), 0.5 = half size (~4x less memory), 0.75 = 75% size
+            frame_scale = float(os.environ.get('FRAME_SCALE', '1.0'))
+            
             while self.running:
                 ret, frame = cap.read()
                 if not ret:
                     # Stream might have ended or connection lost
                     print("Failed to read frame, stream may have ended")
                     break
+                
+                # Optionally resize frame to reduce memory usage
+                if frame is not None and frame_scale < 1.0:
+                    height, width = frame.shape[:2]
+                    new_width = int(width * frame_scale)
+                    new_height = int(height * frame_scale)
+                    frame = cv2.resize(frame, (new_width, new_height))
                 
                 # Keep only the latest frame to minimize memory usage
                 if not self.frame_queue.full():

@@ -44,12 +44,14 @@ class LevelDetector:
         self.tesseract_available = self._check_tesseract()
         
         # Initialize EasyOCR if available (better for unusual fonts)
+        # Can be disabled via DISABLE_EASYOCR env var to save ~1-2GB RAM
         self.easyocr_reader = None
         self.easyocr_available = False
-        if EASYOCR_AVAILABLE:
+        if EASYOCR_AVAILABLE and os.environ.get('DISABLE_EASYOCR', '').lower() != 'true':
             try:
                 # Initialize EasyOCR reader (English only for speed)
                 print("Initializing EasyOCR (this may take a moment on first run)...")
+                print("NOTE: EasyOCR uses ~1-2GB RAM. Set DISABLE_EASYOCR=true to save memory.")
                 self.easyocr_reader = easyocr.Reader(['en'], gpu=False)
                 self.easyocr_available = True
                 print("EasyOCR initialized successfully")
@@ -57,6 +59,8 @@ class LevelDetector:
                 print(f"EasyOCR initialization failed: {e}")
                 print("Falling back to Tesseract only")
                 self.easyocr_available = False
+        elif os.environ.get('DISABLE_EASYOCR', '').lower() == 'true':
+            print("EasyOCR disabled via DISABLE_EASYOCR environment variable (saves ~1-2GB RAM)")
         
         # Template matching
         self.template = None

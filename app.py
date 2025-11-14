@@ -112,7 +112,8 @@ stream_manager = StreamManager(level_detector, database)
 
 # Maximum number of streams that can be monitored simultaneously
 # Each stream uses CPU/network resources, so limit to prevent overload
-MAX_STREAMS = 10  # Adjust based on your system capabilities
+# Reduce this number if you have limited RAM (recommended: 2-4GB RAM = 3-5 streams, 4-8GB RAM = 5-10 streams)
+MAX_STREAMS = int(os.environ.get('MAX_STREAMS', 5))  # Default to 5 streams for lower memory usage
 
 # Check if Tesseract is available
 if not level_detector.tesseract_available:
