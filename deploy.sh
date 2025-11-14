@@ -32,6 +32,7 @@ if [ "$OS" == "ubuntu" ] || [ "$OS" == "debian" ]; then
         python3-pip \
         python3-venv \
         tesseract-ocr \
+        tesseract-ocr-eng \
         ffmpeg \
         build-essential \
         libssl-dev \
@@ -41,6 +42,7 @@ elif [ "$OS" == "centos" ] || [ "$OS" == "rhel" ] || [ "$OS" == "fedora" ]; then
         python3 \
         python3-pip \
         tesseract \
+        tesseract-langpack-eng \
         ffmpeg \
         gcc \
         openssl-devel \
@@ -68,9 +70,41 @@ pip install -r requirements.txt
 echo ""
 echo "Step 5: Verifying Tesseract installation..."
 if command -v tesseract &> /dev/null; then
-    tesseract --version
+    TESSERACT_VERSION=$(tesseract --version 2>&1 | head -n 1)
+    echo "✓ Tesseract found: $TESSERACT_VERSION"
+    
+    # Verify Tesseract is accessible from Python
+    echo "Verifying Tesseract Python integration..."
+    if python3 -c "import pytesseract; print('Tesseract version:', pytesseract.get_tesseract_version())" 2>/dev/null; then
+        echo "✓ Tesseract is accessible from Python"
+    else
+        echo "✗ WARNING: Tesseract is installed but not accessible from Python"
+        echo "  This may cause OCR detection to fail."
+        echo "  Try running: export TESSDATA_PREFIX=/usr/share/tesseract-ocr"
+    fi
 else
-    echo "WARNING: Tesseract not found in PATH. OCR may not work."
+    echo "✗ ERROR: Tesseract not found in PATH!"
+    echo "  Tesseract is required for OCR detection to work."
+    echo "  Please install it manually:"
+    echo "    Ubuntu/Debian: sudo apt-get install tesseract-ocr tesseract-ocr-eng"
+    echo "    CentOS/RHEL: sudo yum install tesseract tesseract-langpack-eng"
+    exit 1
+fi
+
+echo ""
+echo "Step 6: Verifying other system dependencies..."
+# Verify streamlink
+if command -v streamlink &> /dev/null || [ -f "venv/bin/streamlink" ]; then
+    echo "✓ streamlink found"
+else
+    echo "✗ WARNING: streamlink not found (should be in venv/bin/streamlink)"
+fi
+
+# Verify ffmpeg
+if command -v ffmpeg &> /dev/null; then
+    echo "✓ ffmpeg found"
+else
+    echo "⚠ WARNING: ffmpeg not found (optional, but recommended)"
 fi
 
 echo ""
@@ -80,7 +114,5 @@ echo "To run the application:"
 echo "  1. Activate virtual environment: source venv/bin/activate"
 echo "  2. Set environment variables (see .env.example)"
 echo "  3. Run: python app.py"
-echo "     OR with gunicorn: gunicorn app:app --bind 0.0.0.0:5001"
 echo ""
 echo "For production deployment, see DEPLOYMENT.md"
-
