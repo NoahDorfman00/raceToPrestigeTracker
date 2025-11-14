@@ -153,7 +153,7 @@ class StreamManager:
     
     def _check_stream_live(self, stream_url: str) -> bool:
         """
-        Check if a stream is currently live (lightweight check).
+        Check if a stream is currently live using streamlink.
         
         Args:
             stream_url: Stream URL or username
@@ -173,14 +173,14 @@ class StreamManager:
                 print(f"ERROR: streamlink not found. Cannot check if stream is live: {url}")
                 return False
             
-            # Use streamlink to check if stream is available (lightweight)
-            # This doesn't open the full stream, just checks availability
+            # Use streamlink to check if stream is available
+            # Use longer timeout (15 seconds) to allow streamlink time to check
             cmd = [streamlink_path, '--json', url, 'best']
             result = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=5,
+                timeout=15,  # Increased timeout to 15 seconds
                 text=True
             )
             
@@ -189,12 +189,18 @@ class StreamManager:
                 print(f"✓ Stream is LIVE: {url}")
                 return True
             else:
-                # Only log if it's not a simple "not live" error
-                if result.stderr and 'No playable streams found' not in result.stderr:
-                    print(f"✗ Stream check failed for {url}: {result.stderr[:200]}")
+                # Check stderr to see what the actual error is
+                stderr_text = result.stderr or ""
+                if 'No playable streams found' in stderr_text or 'No streams found' in stderr_text:
+                    # Stream is simply not live - this is expected, don't log it
+                    return False
+                elif 'error' in stderr_text.lower() or 'failed' in stderr_text.lower():
+                    # There was an actual error
+                    print(f"✗ Stream check failed for {url}: {stderr_text[:200]}")
                 return False
         except subprocess.TimeoutExpired:
-            print(f"✗ Stream check TIMED OUT: {stream_url}")
+            # Timeout after 15 seconds - stream is likely not live or streamlink is slow
+            # Don't log timeout as it's expected for offline streams
             return False
         except Exception as e:
             print(f"✗ Error checking stream ({stream_url}): {e}")
