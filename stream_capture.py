@@ -66,26 +66,66 @@ class StreamCapture:
             if not streamlink_path:
                 raise Exception("streamlink not found. Please install streamlink: pip install streamlink")
             
-            # Get the stream URL from streamlink
-            cmd_get_url = [streamlink_path, '--stream-url', url, 'best']
-            result = subprocess.run(
-                cmd_get_url,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=10
-            )
+            # Get the stream URL from streamlink with retry logic
+            # Use longer timeout (25 seconds) to match live check timeout
+            max_retries = 3
+            retry_delay = 2  # seconds between retries
+            stream_url = None
             
-            if result.returncode != 0:
-                raise Exception(f"Failed to get stream URL: {result.stderr}")
+            for attempt in range(1, max_retries + 1):
+                try:
+                    print(f"Getting stream URL (attempt {attempt}/{max_retries})...")
+                    cmd_get_url = [streamlink_path, '--stream-url', url, 'best']
+                    result = subprocess.run(
+                        cmd_get_url,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=25  # Increased timeout to 25 seconds
+                    )
+                    
+                    if result.returncode == 0:
+                        stream_url = result.stdout.strip()
+                        if stream_url:
+                            print(f"✓ Stream URL obtained (attempt {attempt})")
+                            break
+                        else:
+                            print(f"✗ Empty stream URL on attempt {attempt}")
+                    else:
+                        error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                        print(f"✗ Failed to get stream URL on attempt {attempt}: {error_msg}")
+                        
+                        # Don't retry if stream is clearly not available
+                        if 'No playable streams found' in error_msg or 'No streams found' in error_msg:
+                            print(f"Stream is not available (not live or ended)")
+                            return
+                        
+                except subprocess.TimeoutExpired:
+                    print(f"✗ Timeout getting stream URL (attempt {attempt}/{max_retries})")
+                    if attempt < max_retries:
+                        print(f"Retrying in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                    else:
+                        print("All attempts failed - timeout getting stream URL")
+                        return
+                except Exception as e:
+                    print(f"✗ Error getting stream URL (attempt {attempt}): {e}")
+                    if attempt < max_retries:
+                        time.sleep(retry_delay)
+                    else:
+                        raise
             
-            stream_url = result.stdout.strip()
-            print(f"Stream URL obtained, starting capture...")
+            if not stream_url:
+                print("Failed to get stream URL after all retries")
+                return
             
             # Use OpenCV to read directly from the stream URL
+            print(f"Opening video capture for stream...")
             cap = cv2.VideoCapture(stream_url)
             if not cap.isOpened():
                 raise Exception("Failed to open video capture")
+            
+            print(f"✓ Video capture opened successfully")
             
             # Minimize buffer to reduce latency
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -94,12 +134,17 @@ class StreamCapture:
             # Default to 1.0 (no scaling), 0.5 = half size (~4x less memory), 0.75 = 75% size
             frame_scale = float(os.environ.get('FRAME_SCALE', '1.0'))
             
+            frame_count = 0
             while self.running:
                 ret, frame = cap.read()
                 if not ret:
                     # Stream might have ended or connection lost
                     print("Failed to read frame, stream may have ended")
                     break
+                
+                frame_count += 1
+                if frame_count == 1:
+                    print(f"✓ Successfully captured first frame from stream")
                 
                 # Optionally resize frame to reduce memory usage
                 if frame is not None and frame_scale < 1.0:
@@ -119,12 +164,15 @@ class StreamCapture:
                         pass
                         
         except subprocess.TimeoutExpired:
-            print("Timeout getting stream URL")
+            print(f"Timeout getting stream URL for {url}")
         except Exception as e:
-            print(f"Error capturing stream: {e}")
+            print(f"Error capturing stream ({url}): {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             if cap is not None:
                 cap.release()
+                print(f"Video capture released for {url}")
             if self.process:
                 self.process.terminate()
                 self.process.wait()
