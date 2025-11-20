@@ -13,4 +13,5 @@ easyocr==1.7.1
 firebase-admin>=6.0.0
 google-cloud-storage>=2.10.0
 gunicorn>=21.2.0
+python-dotenv>=1.0.0
 

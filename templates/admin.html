@@ -455,25 +455,50 @@
             return `Prestige ${prestige}`;
         }
 
-        // Firebase configuration - Replace with your Firebase config
-        const firebaseConfig = {
-            apiKey: "AIzaSyAf3mutoDzbSICtmTasx-YAe_CzvnFz5C4",
-            authDomain: "racetomasterprestige.firebaseapp.com",
-            projectId: "racetomasterprestige",
-            storageBucket: "racetomasterprestige.firebasestorage.app",
-            messagingSenderId: "45736445622",
-            appId: "1:45736445622:web:4e0c9d29d1ea98847f0817",
-            measurementId: "G-3XQDC2KPCK"
-        };
+        // Firebase configuration - Load from backend API
+        let firebaseConfig = null;
+        let auth = null;
 
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
+        // Fetch Firebase config from backend
+        async function initializeFirebase() {
+            try {
+                const response = await fetch('/api/firebase-config');
+                if (!response.ok) {
+                    throw new Error('Failed to load Firebase configuration');
+                }
+                firebaseConfig = await response.json();
+                
+                // Validate that required config is present
+                if (!firebaseConfig.apiKey || !firebaseConfig.authDomain) {
+                    throw new Error('Firebase configuration is incomplete. Please check your .env file.');
+                }
+                
+                // Initialize Firebase
+                firebase.initializeApp(firebaseConfig);
+                auth = firebase.auth();
+                
+                // Now that Firebase is initialized, set up auth state listener
+                setupAuthStateListener();
+            } catch (error) {
+                console.error('Error initializing Firebase:', error);
+                document.getElementById('loadingScreen').style.display = 'none';
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('adminContent').style.display = 'none';
+                alert('Failed to initialize Firebase. Please check your configuration.');
+            }
+        }
 
         let idToken = null;
 
-        // Check authentication state
-        auth.onAuthStateChanged(async (user) => {
+        // Set up authentication state listener (called after Firebase is initialized)
+        function setupAuthStateListener() {
+            if (!auth) {
+                console.error('Firebase auth not initialized');
+                return;
+            }
+            
+            // Check authentication state
+            auth.onAuthStateChanged(async (user) => {
             if (user) {
                 // User is signed in
                 try {
@@ -524,7 +549,8 @@
                 // User is signed out
                 showLogin();
             }
-        });
+            });
+        }
 
         function showLogin() {
             document.getElementById('loadingScreen').style.display = 'none';
@@ -842,6 +868,9 @@
         document.getElementById('loadingScreen').style.display = 'block';
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('adminContent').style.display = 'none';
+        
+        // Initialize Firebase on page load
+        initializeFirebase();
     </script>
 </body>
 

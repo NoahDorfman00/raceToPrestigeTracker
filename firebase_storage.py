@@ -12,8 +12,8 @@ except ImportError:
     STORAGE_AVAILABLE = False
     print("WARNING: google-cloud-storage not installed. Firebase Storage uploads will not work.")
 
-# Storage bucket name
-STORAGE_BUCKET = "racetomasterprestige.firebasestorage.app"
+# Storage bucket name - load from environment variable or use default
+STORAGE_BUCKET = os.environ.get('FIREBASE_STORAGE_BUCKET', 'racetomasterprestige.firebasestorage.app')
 
 
 class FirebaseStorageService:

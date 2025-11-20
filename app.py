@@ -10,10 +10,14 @@ import numpy as np
 import os
 import json
 from functools import wraps
+from dotenv import load_dotenv
 from level_detector import LevelDetector
 from stream_manager import StreamManager
 from database import StreamDatabase
 from firebase_storage import get_storage_service
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Firebase Admin SDK for token verification
 try:
@@ -59,12 +63,14 @@ if FIREBASE_AVAILABLE:
         print("   Admin authentication will not work until Firebase is configured.")
 
 # Authorized admin emails (whitelist)
-# Add your email addresses here to restrict admin access
-AUTHORIZED_ADMIN_EMAILS = [
-    'n.dorfman00@gmail.com',
-    # Add your authorized email addresses here
-    # Example: 'your-email@gmail.com',
-]
+# Load from environment variable (comma-separated list)
+# Example: AUTHORIZED_ADMIN_EMAILS=email1@gmail.com,email2@gmail.com
+authorized_emails_env = os.environ.get('AUTHORIZED_ADMIN_EMAILS', '')
+if authorized_emails_env:
+    AUTHORIZED_ADMIN_EMAILS = [email.strip() for email in authorized_emails_env.split(',') if email.strip()]
+else:
+    # Fallback to default if not set in environment
+    AUTHORIZED_ADMIN_EMAILS = ['n.dorfman00@gmail.com']
 
 def require_auth(f):
     """Decorator to require Firebase authentication and authorized email."""
@@ -221,6 +227,19 @@ def index():
 def admin_page():
     """Serve the admin page."""
     return render_template('admin.html')
+
+@app.route('/api/firebase-config')
+def get_firebase_config():
+    """Get Firebase client configuration from environment variables."""
+    return jsonify({
+        'apiKey': os.environ.get('FIREBASE_API_KEY', ''),
+        'authDomain': os.environ.get('FIREBASE_AUTH_DOMAIN', ''),
+        'projectId': os.environ.get('FIREBASE_PROJECT_ID', ''),
+        'storageBucket': os.environ.get('FIREBASE_STORAGE_BUCKET', ''),
+        'messagingSenderId': os.environ.get('FIREBASE_MESSAGING_SENDER_ID', ''),
+        'appId': os.environ.get('FIREBASE_APP_ID', ''),
+        'measurementId': os.environ.get('FIREBASE_MEASUREMENT_ID', '')
+    })
 
 
 @app.route('/test')
