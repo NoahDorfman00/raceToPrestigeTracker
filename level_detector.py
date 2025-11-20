@@ -40,7 +40,8 @@ class LevelDetector:
         
         # Valid ranges for validation
         self.valid_level_range = (1, 55)
-        self.valid_prestige_range = (0, 10)
+        self.valid_prestige_range = (0, 20)  # Extended to 20 to include PRESTIGE MASTER
+        self.prestige_master_value = 20  # PRESTIGE MASTER is treated as the highest prestige
         self.tesseract_available = self._check_tesseract()
         
         # Initialize EasyOCR if available (better for unusual fonts)
@@ -892,6 +893,11 @@ class LevelDetector:
                         is_prestige = self._is_likely_prestige(text_clean)
                         text_upper = text_clean.upper()
                         
+                        # Check for "PRESTIGE MASTER" first (highest prestige)
+                        if 'PRESTIGE' in text_upper and 'MASTER' in text_upper:
+                            print(f"EasyOCR found PRESTIGE MASTER - setting to {self.prestige_master_value}")
+                            return self.prestige_master_value, text_clean
+                        
                         if is_prestige or 'PRESTIGE' in text_upper:
                             # First, check if the number is in the same text (e.g., "PRESTIGE 1")
                             numbers_in_text = re.findall(r'\d+', text_clean)
@@ -929,6 +935,17 @@ class LevelDetector:
                                 prestige_num, _ = numbers_with_bbox[0]
                                 print(f"EasyOCR found Prestige (with Tesseract number): {prestige_num}")
                                 return prestige_num, text_clean
+                            
+                            # Check if it's "PRESTIGE MASTER" (might be split across multiple detections)
+                            # Check all EasyOCR results for "MASTER" text
+                            for other_text, other_conf, other_bbox in easyocr_results:
+                                if other_conf > 0.5 and 'MASTER' in other_text.upper():
+                                    # Check if MASTER is near prestige text
+                                    px, py, pw, ph = bbox
+                                    mx, my, mw, mh = other_bbox
+                                    if (abs(mx - (px + pw)) < 200 and abs(my - py) < max(ph, mh) * 2):
+                                        print(f"EasyOCR found PRESTIGE MASTER - setting to {self.prestige_master_value}")
+                                        return self.prestige_master_value, text_clean
                             
                             # Just prestige word found, no number
                             print("EasyOCR found 'Prestige' but no number - defaulting to 0")
@@ -1031,6 +1048,11 @@ class LevelDetector:
                 
                 text_upper = text.upper()
                 
+                # Check for "PRESTIGE MASTER" first (highest prestige)
+                if 'PRESTIGE' in text_upper and 'MASTER' in text_upper:
+                    print(f"Found PRESTIGE MASTER - setting to {self.prestige_master_value}")
+                    return self.prestige_master_value, text.strip()
+                
                 # Check if text is likely "prestige" (handles OCR errors like "prestice")
                 is_prestige = self._is_likely_prestige(text)
                 
@@ -1086,6 +1108,13 @@ class LevelDetector:
                                 return prestige_num, text.strip()
                     except Exception as e:
                         print(f"Error extracting numbers with bounding boxes: {e}")
+                    
+                    # Check if "MASTER" appears in any of the OCR text (might be in a different detection)
+                    # Check all OCR text collected so far
+                    for ocr_text in all_ocr_text:
+                        if 'MASTER' in ocr_text.upper():
+                            print(f"Found PRESTIGE MASTER in OCR text - setting to {self.prestige_master_value}")
+                            return self.prestige_master_value, text.strip()
                     
                     # If "Prestige" found but no number, might be prestige 0 or error
                     print("Found 'Prestige' (or likely match) but no number - defaulting to 0")
@@ -1335,7 +1364,11 @@ class LevelDetector:
                             (prestige_region_x, prestige_region_y),
                             (prestige_region_x + prestige_region_w, prestige_region_y + prestige_region_h),
                             (255, 0, 255), 2)  # Magenta for prestige region
-                prestige_label = f"PRESTIGE: {prestige}" if prestige is not None else "PRESTIGE: ?"
+                # Display "PRESTIGE MASTER" for prestige master value, otherwise show number
+                if prestige == self.prestige_master_value:
+                    prestige_label = "PRESTIGE: MASTER"
+                else:
+                    prestige_label = f"PRESTIGE: {prestige}" if prestige is not None else "PRESTIGE: ?"
                 cv2.putText(annotated_frame, prestige_label,
                           (prestige_region_x, prestige_region_y - 5),
                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)

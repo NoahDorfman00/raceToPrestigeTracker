@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Race to Master Prestige Leaderboard - Admin</title>
+    <title>Call of Duty Black Ops 7: Race To Master Prestige - Admin</title>
 
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -369,7 +369,7 @@
     <div id="adminContent" class="container" style="display: none;">
         <div class="header">
             <div>
-                <h1>🔧 Race to Master Prestige Leaderboard - Admin</h1>
+                <h1>🔧 Call of Duty Black Ops 7: Race To Master Prestige - Admin</h1>
             </div>
             <div style="display: flex; align-items: center; gap: 15px;">
                 <div class="user-info">
@@ -389,6 +389,17 @@
             <div id="tab-streams" class="tab-content active">
                 <h2 style="margin-bottom: 20px;">Manage Streams</h2>
                 <div class="error-message" id="errorMsg"></div>
+
+                <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    <h3 style="margin-bottom: 10px; color: #333;">Firebase Storage</h3>
+                    <p style="margin-bottom: 15px; color: #666; font-size: 0.9em;">
+                        Upload all annotated frames and streams_data.json to Firebase Storage.
+                    </p>
+                    <button id="uploadBtn" onclick="uploadAllToStorage()" class="test-button" style="margin-right: 0;">
+                        Upload All Files to Storage
+                    </button>
+                    <div id="uploadStatus" style="margin-top: 10px; display: none;"></div>
+                </div>
 
                 <div class="add-stream-form">
                     <input type="text" id="streamUrl" placeholder="Twitch URL or username">
@@ -437,6 +448,13 @@
     <!-- End of adminContent -->
 
     <script>
+        // Format prestige: show "Master Prestige" for prestige 20
+        function formatPrestige(prestige) {
+            if (prestige == null || prestige === undefined) return 'Prestige 0';
+            if (prestige == 20) return 'Master Prestige';
+            return `Prestige ${prestige}`;
+        }
+
         // Firebase configuration - Replace with your Firebase config
         const firebaseConfig = {
             apiKey: "AIzaSyAf3mutoDzbSICtmTasx-YAe_CzvnFz5C4",
@@ -662,7 +680,7 @@
                                 <span class="status-indicator ${statusClass}"></span>
                                 ${stream.streamer_name || stream.stream_url}
                             </div>
-                            <div class="stream-level">Prestige ${stream.prestige || 0} | Level ${stream.level || 0}</div>
+                            <div class="stream-level">${formatPrestige(stream.prestige || 0)} | Level ${stream.level || 0}</div>
                         </div>
                         <button class="btn-remove" onclick="removeStream(${stream.id})">Remove</button>
                     `;
@@ -765,6 +783,60 @@
                 addStream();
             }
         });
+
+        async function uploadAllToStorage() {
+            const uploadBtn = document.getElementById('uploadBtn');
+            const uploadStatus = document.getElementById('uploadStatus');
+
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Uploading...';
+            uploadStatus.style.display = 'block';
+            uploadStatus.innerHTML = '<p style="color: #666;">Uploading files to Firebase Storage...</p>';
+
+            try {
+                const response = await fetch('/api/storage/upload_all', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                let data;
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    // If response is not JSON, get text instead
+                    const text = await response.text();
+                    throw new Error(`Server returned ${response.status} ${response.statusText}: ${text.substring(0, 200)}`);
+                }
+
+                if (!response.ok) {
+                    throw new Error(data.error || data.details || `Upload failed with status ${response.status}`);
+                }
+
+                const results = data.results || {};
+                let statusHtml = '<div style="color: #28a745; font-weight: 600;">✓ Upload completed successfully!</div>';
+                statusHtml += '<ul style="margin-top: 10px; color: #666; font-size: 0.9em;">';
+                statusHtml += `<li>Frames uploaded: ${results.frames_uploaded || 0}</li>`;
+                statusHtml += `<li>Frames failed: ${results.frames_failed || 0}</li>`;
+                if (results.frames_deleted !== undefined && results.frames_deleted > 0) {
+                    statusHtml += `<li>Old frames cleaned up: ${results.frames_deleted}</li>`;
+                }
+                statusHtml += `<li>Data file uploaded: ${results.data_uploaded ? 'Yes' : 'No'}</li>`;
+                if (results.errors && results.errors.length > 0) {
+                    statusHtml += '<li style="color: #dc3545;">Errors: ' + results.errors.join(', ') + '</li>';
+                }
+                statusHtml += '</ul>';
+                uploadStatus.innerHTML = statusHtml;
+            } catch (error) {
+                console.error('Upload error:', error);
+                uploadStatus.innerHTML = `<p style="color: #dc3545;">Error: ${error.message}</p>`;
+                uploadStatus.innerHTML += '<p style="color: #666; font-size: 0.9em; margin-top: 10px;">Make sure the server is running and has been restarted after adding the new endpoint.</p>';
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload All Files to Storage';
+            }
+        }
 
         // Initial load - show loading screen first
         document.getElementById('loadingScreen').style.display = 'block';

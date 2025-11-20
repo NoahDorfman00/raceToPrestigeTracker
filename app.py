@@ -1,5 +1,5 @@
 """
-Main Flask application for Race to Master Prestige Leaderboard.
+Main Flask application for Call of Duty Black Ops 7: Race To Master Prestige Leaderboard.
 """
 from flask import Flask, render_template, jsonify, request, Response
 from flask_cors import CORS
@@ -13,6 +13,7 @@ from functools import wraps
 from level_detector import LevelDetector
 from stream_manager import StreamManager
 from database import StreamDatabase
+from firebase_storage import get_storage_service
 
 # Firebase Admin SDK for token verification
 try:
@@ -69,6 +70,7 @@ def require_auth(f):
     """Decorator to require Firebase authentication and authorized email."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        print(f"require_auth decorator called for {request.path} - method: {request.method}")
         if not FIREBASE_AVAILABLE:
             return jsonify({'error': 'Firebase Admin SDK not installed. Run: pip install firebase-admin'}), 503
         
@@ -80,7 +82,9 @@ def require_auth(f):
         
         # Get token from Authorization header
         auth_header = request.headers.get('Authorization')
+        print(f"Authorization header: {auth_header[:50] if auth_header else 'None'}...")
         if not auth_header or not auth_header.startswith('Bearer '):
+            print("No valid authorization token provided")
             return jsonify({'error': 'No authorization token provided'}), 401
         
         token = auth_header.split('Bearer ')[1]
@@ -89,6 +93,7 @@ def require_auth(f):
             # Verify the token
             decoded_token = auth.verify_id_token(token)
             user_email = decoded_token.get('email')
+            print(f"Token verified for user: {user_email}")
             
             # Check if email is authorized (if whitelist is configured)
             if AUTHORIZED_ADMIN_EMAILS and user_email not in AUTHORIZED_ADMIN_EMAILS:
@@ -100,6 +105,8 @@ def require_auth(f):
             return f(*args, **kwargs)
         except Exception as e:
             print(f"Token verification failed: {e}")
+            import traceback
+            traceback.print_exc()
             return jsonify({'error': 'Invalid or expired token'}), 401
     
     return decorated_function
@@ -129,7 +136,7 @@ def initialize_app():
         return
     _initialized = True
     
-    print("Initializing StreamWatcher application...")
+    print("Initializing Call of Duty Black Ops 7: Race To Master Prestige application...")
     print(f"Multi-stream monitoring enabled (max {MAX_STREAMS} streams)")
     
     # Check if template is loaded
@@ -545,7 +552,9 @@ def generate_frames(stream_id: int = None):
                 
                 # Add stream info text
                 if stream_info:
-                    info_text = f"{stream_info.get('streamer_name', 'Stream')} - P{stream_info.get('prestige', 0)} L{stream_info.get('level', 0)}"
+                    prestige = stream_info.get('prestige', 0)
+                    prestige_text = 'Master' if prestige == 20 else f'P{prestige}'
+                    info_text = f"{stream_info.get('streamer_name', 'Stream')} - {prestige_text} L{stream_info.get('level', 0)}"
                     cv2.putText(annotated_frame, info_text, (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                 
@@ -774,6 +783,56 @@ def test_video():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/storage/upload_all', methods=['POST'])
+@require_auth
+def upload_all_to_storage():
+    """Manually trigger upload of all files to Firebase Storage."""
+    print(f"Upload all endpoint called - method: {request.method}")
+    import sys
+    sys.stdout.flush()  # Flush stdout to ensure logs are visible
+    
+    try:
+        storage_service = get_storage_service()
+        if not storage_service or storage_service.bucket is None:
+            print("Firebase Storage not available")
+            return jsonify({
+                'error': 'Firebase Storage not available',
+                'details': 'Firebase Storage is not configured or google-cloud-storage is not installed.'
+            }), 503
+        
+        # Get paths from database
+        frames_dir = database.frames_dir
+        data_file = database.data_file
+        print(f"Uploading files from {frames_dir} and {data_file}")
+        sys.stdout.flush()
+        
+        # Upload all files (pass database to get latest frames per stream)
+        # Enable cleanup to remove old files (but cleanup is now disabled to avoid hanging)
+        print("Starting upload_all_files call...")
+        sys.stdout.flush()
+        results = storage_service.upload_all_files(database, frames_dir, data_file, cleanup_old=False)
+        print(f"Upload completed: {results}")
+        sys.stdout.flush()
+        
+        # Build response
+        response_data = {
+            'success': True,
+            'message': 'Upload completed',
+            'results': results
+        }
+        print(f"Returning response: {response_data}")
+        sys.stdout.flush()
+        
+        return jsonify(response_data)
+    except Exception as e:
+        print(f"Error in upload_all_to_storage: {e}")
+        import traceback
+        traceback.print_exc()
+        import sys
+        sys.stdout.flush()
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     # Development mode - initialization already happened above
     port = int(os.environ.get('PORT', 5001))
@@ -785,6 +844,7 @@ if __name__ == '__main__':
     print("  POST /api/streams/remove - Remove a stream")
     print("  GET  /api/streams - Get all streams")
     print("  GET  /api/leaderboard - Get leaderboard")
+    print("  POST /api/storage/upload_all - Upload all files to Firebase Storage")
     print()
     # Enable threading for production use (allows multiple concurrent requests)
     app.run(debug=debug, host='0.0.0.0', port=port, threaded=True)

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Race to Master Prestige Leaderboard - Test Mode</title>
+    <title>Call of Duty Black Ops 7: Race To Master Prestige - Test Mode</title>
     <style>
         * {
             margin: 0;
@@ -209,8 +209,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🧪 Race to Master Prestige Leaderboard - Test Mode</h1>
-            <a href="/" class="nav-link">← Back to Monitor</a>
+            <h1>🧪 Call of Duty Black Ops 7: Race To Master Prestige - Test Mode</h1>
+            <a href="/" class="nav-link">← Back to Leaderboard</a>
         </div>
 
         <div class="tabs">
@@ -419,6 +419,13 @@
     </div>
 
     <script>
+        // Format prestige: show "Master Prestige" for prestige 20
+        function formatPrestige(prestige) {
+            if (prestige == null || prestige === undefined) return '—';
+            if (prestige == 20) return 'Master Prestige';
+            return prestige;
+        }
+
         function switchTab(tabName) {
             // Hide all tabs
             document.querySelectorAll('.tab-content').forEach(tab => {
@@ -493,7 +500,7 @@
                 };
 
                 document.getElementById('testLevel').textContent = data.result?.level || '—';
-                document.getElementById('testPrestige').textContent = data.result?.prestige || '—';
+                document.getElementById('testPrestige').textContent = formatPrestige(data.result?.prestige);
 
                 // Show prestige OCR debug text
                 const prestigeOcrContainer = document.getElementById('prestigeOcrContainer');
@@ -831,7 +838,7 @@
                         <p><strong>Found ${data.results.length} detections in ${data.total_frames} frames:</strong></p>
                         ${data.results.map(r => `
                             <div class="video-result-item">
-                                Frame ${r.frame}: Level ${r.level}, Prestige ${r.prestige}
+                                Frame ${r.frame}: Level ${r.level}, ${formatPrestige(r.prestige)}
                             </div>
                         `).join('')}
                     `;

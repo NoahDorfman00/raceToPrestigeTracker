@@ -7,25 +7,25 @@
     <meta name="theme-color" content="#667eea" />
 
     <!-- HTML Meta Tags -->
-    <title>Race to Master Prestige Leaderboard</title>
+    <title>Call of Duty Black Ops 7: Race To Master Prestige Leaderboard</title>
     <meta name="description"
-        content="Track Call of Duty streamers racing to Master Prestige. Real-time level and prestige leaderboard.">
+        content="Track Call of Duty Black Ops 7 streamers racing to Master Prestige. Real-time level and prestige leaderboard.">
 
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
 
     <!-- Facebook Meta Tags -->
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Race to Master Prestige Leaderboard">
+    <meta property="og:title" content="Call of Duty Black Ops 7: Race To Master Prestige Leaderboard">
     <meta property="og:description"
-        content="Track Call of Duty streamers racing to Master Prestige. Real-time level and prestige leaderboard.">
+        content="Track Call of Duty Black Ops 7 streamers racing to Master Prestige. Real-time level and prestige leaderboard.">
     <meta property="og:image" content="/social.png">
 
     <!-- Twitter Meta Tags -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Race to Master Prestige Leaderboard">
+    <meta name="twitter:title" content="Call of Duty Black Ops 7: Race To Master Prestige Leaderboard">
     <meta name="twitter:description"
-        content="Track Call of Duty streamers racing to Master Prestige. Real-time level and prestige leaderboard.">
+        content="Track Call of Duty Black Ops 7 streamers racing to Master Prestige. Real-time level and prestige leaderboard.">
     <meta name="twitter:image" content="/social.png">
     <style>
         * {
@@ -309,8 +309,8 @@
     <div class="container">
         <div class="header">
             <div>
-                <h1>🎮 Race to Master Prestige Leaderboard</h1>
-                <p class="subtitle">Call of Duty Level & Prestige Leaderboard</p>
+                <h1>🎮 Call of Duty Black Ops 7: Race To Master Prestige</h1>
+                <p class="subtitle">Real-time Leaderboard</p>
             </div>
             <a href="/admin" class="login-btn">Admin</a>
         </div>
@@ -327,6 +327,13 @@
 
     <script>
         let expandedStreamId = null;
+
+        // Format prestige: show "Master Prestige" for prestige 20
+        function formatPrestige(prestige) {
+            if (prestige == null || prestige === undefined) return '—';
+            if (prestige == 20) return 'Master Prestige';
+            return `Prestige ${prestige}`;
+        }
 
         async function refreshLeaderboard() {
             try {
@@ -363,7 +370,7 @@
                                     <span class="status-dot ${isOnline ? 'online' : 'offline'}" title="${isOnline ? 'Live' : 'Offline'}"></span>
                                     ${entry.streamer_name || entry.stream_url}
                                 </div>
-                                <div class="leaderboard-level">Prestige ${entry.prestige} | Level ${entry.level}</div>
+                                <div class="leaderboard-level">${formatPrestige(entry.prestige)} | Level ${entry.level}</div>
                             </div>
                             ${watchButton}
                             <div class="expand-icon" title="View details">ℹ</div>
@@ -428,7 +435,7 @@
                                     <div class="log-timestamp">${timeStr}</div>
                                     <div class="log-text">
                                         ${log.detected
-                                    ? `Detected: Prestige ${log.prestige}, Level ${log.level}<br>OCR: "${log.ocr_text}"`
+                                    ? `Detected: ${formatPrestige(log.prestige)}, Level ${log.level}<br>OCR: "${log.ocr_text}"`
                                     : 'No detection - OCR did not find prestige/level'}
                                     </div>
                                 </div>

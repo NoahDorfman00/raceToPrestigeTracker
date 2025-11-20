@@ -6,6 +6,7 @@ import os
 import time
 from typing import Optional, Dict, List
 from datetime import datetime
+from firebase_storage import get_storage_service
 
 
 class StreamDatabase:
@@ -37,6 +38,9 @@ class StreamDatabase:
                 'next_id': 1
             }
             self._save_data(data)
+        else:
+            # Migrate existing file paths to new fixed format
+            self._migrate_frame_paths()
     
     def _load_data(self) -> Dict:
         """Load data from file."""
@@ -50,6 +54,11 @@ class StreamDatabase:
         """Save data to file."""
         with open(self.data_file, 'w') as f:
             json.dump(data, f, indent=2)
+        
+        # Upload to Firebase Storage asynchronously
+        storage_service = get_storage_service()
+        if storage_service:
+            storage_service.upload_streams_data_async(self.data_file)
     
     def add_or_update_stream(self, stream_url: str, streamer_name: Optional[str] = None) -> int:
         """
@@ -297,4 +306,102 @@ class StreamDatabase:
             if len(parts) > 0:
                 return parts[-1].split('?')[0]
         return stream_url
+    
+    def _migrate_frame_paths(self):
+        """
+        Migrate existing timestamped frame paths to new fixed format.
+        Old format: stream_{stream_id}_{timestamp}_annotated.jpg
+        New format: stream_{stream_id}_annotated.jpg
+        
+        Also renames existing files on disk if they exist.
+        """
+        try:
+            data = self._load_data()
+            updated = False
+            
+            for stream_key, stream_data in data.get('streams', {}).items():
+                stream_id = stream_data.get('id')
+                if not stream_id:
+                    continue
+                
+                # Migrate annotated frame path
+                old_annotated = stream_data.get('last_annotated_frame')
+                if old_annotated:
+                    # Check if it's old timestamped format
+                    old_filename = os.path.basename(old_annotated)
+                    # Old format has 4 parts: stream, ID, timestamp, annotated.jpg
+                    # New format has 3 parts: stream, ID, annotated.jpg
+                    if old_filename.count('_') >= 3 and old_filename.endswith('_annotated.jpg'):
+                        parts = old_filename.split('_')
+                        # Check if it's actually the old format (has timestamp)
+                        if len(parts) >= 4:
+                            # Convert to new fixed format
+                            new_annotated = os.path.join(self.frames_dir, f"stream_{stream_id}_annotated.jpg")
+                            
+                            # Rename file on disk if it exists
+                            old_path = old_annotated
+                            if not os.path.isabs(old_path):
+                                old_path = os.path.join(os.path.dirname(self.data_file), old_annotated)
+                            
+                            if os.path.exists(old_path):
+                                try:
+                                    # Rename to new fixed filename
+                                    os.rename(old_path, new_annotated)
+                                    print(f"✓ Renamed annotated frame for stream {stream_id}: {old_filename} -> stream_{stream_id}_annotated.jpg")
+                                except Exception as e:
+                                    print(f"⚠ Could not rename file {old_path}: {e}")
+                                    # File might already be renamed or doesn't exist
+                            
+                            # Update path in database
+                            stream_data['last_annotated_frame'] = new_annotated
+                            updated = True
+                            print(f"✓ Migrated annotated frame path for stream {stream_id}")
+                
+                # Migrate original frame path
+                old_original = stream_data.get('last_original_frame')
+                if old_original:
+                    # Check if it's old timestamped format
+                    old_filename = os.path.basename(old_original)
+                    if old_filename.count('_') >= 3 and old_filename.endswith('_original.jpg'):
+                        parts = old_filename.split('_')
+                        # Check if it's actually the old format (has timestamp)
+                        if len(parts) >= 4:
+                            # Convert to new fixed format
+                            new_original = os.path.join(self.frames_dir, f"stream_{stream_id}_original.jpg")
+                            
+                            # Rename file on disk if it exists
+                            old_path = old_original
+                            if not os.path.isabs(old_path):
+                                old_path = os.path.join(os.path.dirname(self.data_file), old_original)
+                            
+                            if os.path.exists(old_path):
+                                try:
+                                    # Rename to new fixed filename
+                                    os.rename(old_path, new_original)
+                                    print(f"✓ Renamed original frame for stream {stream_id}: {old_filename} -> stream_{stream_id}_original.jpg")
+                                except Exception as e:
+                                    print(f"⚠ Could not rename file {old_path}: {e}")
+                                    # File might already be renamed or doesn't exist
+                            
+                            # Update path in database
+                            stream_data['last_original_frame'] = new_original
+                            updated = True
+                            print(f"✓ Migrated original frame path for stream {stream_id}")
+            
+            if updated:
+                # Save migrated data (but don't trigger Firebase upload during migration)
+                # Save directly to avoid triggering upload
+                with open(self.data_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+                print(f"✓ Migrated frame paths in {self.data_file}")
+                return True
+            else:
+                print("No frame paths to migrate (already using new format)")
+                return False
+        except Exception as e:
+            print(f"⚠ Error migrating frame paths: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail if migration fails - just continue
+            return False
 

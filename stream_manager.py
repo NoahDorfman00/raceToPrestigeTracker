@@ -12,6 +12,7 @@ from datetime import datetime
 from stream_capture import StreamCapture
 from level_detector import LevelDetector
 from database import StreamDatabase
+from firebase_storage import get_storage_service
 import cv2
 import numpy as np
 
@@ -381,26 +382,32 @@ class StreamManager:
                                     }
                                     
                                     # Save both annotated and original frames to disk
-                                    timestamp = int(time.time())
-                                    annotated_filename = f"stream_{stream_id}_{timestamp}_annotated.jpg"
-                                    original_filename = f"stream_{stream_id}_{timestamp}_original.jpg"
+                                    # Use fixed filenames (no timestamp) to match Firebase Storage format
+                                    annotated_filename = f"stream_{stream_id}_annotated.jpg"
+                                    original_filename = f"stream_{stream_id}_original.jpg"
                                     annotated_frame_path = os.path.join(self.database.frames_dir, annotated_filename)
                                     original_frame_path = os.path.join(self.database.frames_dir, original_filename)
                                     
-                                    # Remove old frames if they exist
+                                    # Remove old timestamped frames if they exist (cleanup)
                                     old_annotated_path = self.database.get_last_annotated_frame_path(stream_id)
                                     if old_annotated_path and os.path.exists(old_annotated_path):
-                                        try:
-                                            os.remove(old_annotated_path)
-                                        except:
-                                            pass
+                                        # Only delete if it's a different file (old timestamped format)
+                                        if old_annotated_path != annotated_frame_path:
+                                            try:
+                                                os.remove(old_annotated_path)
+                                                print(f"Stream {stream_id}: Removed old timestamped frame: {os.path.basename(old_annotated_path)}")
+                                            except Exception as e:
+                                                print(f"Stream {stream_id}: Warning - Failed to remove old frame: {e}")
                                     
                                     old_original_path = self.database.get_last_original_frame_path(stream_id)
                                     if old_original_path and os.path.exists(old_original_path):
-                                        try:
-                                            os.remove(old_original_path)
-                                        except:
-                                            pass
+                                        # Only delete if it's a different file (old timestamped format)
+                                        if old_original_path != original_frame_path:
+                                            try:
+                                                os.remove(old_original_path)
+                                                print(f"Stream {stream_id}: Removed old timestamped original frame: {os.path.basename(old_original_path)}")
+                                            except Exception as e:
+                                                print(f"Stream {stream_id}: Warning - Failed to remove old original frame: {e}")
                                     
                                     # Save both frames to disk
                                     try:
@@ -412,6 +419,10 @@ class StreamManager:
                                             print(f"  Paths: {annotated_frame_path}, {original_frame_path}")
                                         else:
                                             print(f"Stream {stream_id}: Successfully saved frames to disk")
+                                            # Upload annotated frame to Firebase Storage asynchronously
+                                            storage_service = get_storage_service()
+                                            if storage_service:
+                                                storage_service.upload_annotated_frame_async(annotated_frame_path, stream_id)
                                     except Exception as e:
                                         print(f"Stream {stream_id}: ERROR saving frames - {e}")
                                         import traceback
