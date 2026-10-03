@@ -12,9 +12,6 @@ except ImportError:
     STORAGE_AVAILABLE = False
     print("WARNING: google-cloud-storage not installed. Firebase Storage uploads will not work.")
 
-# Storage bucket name - load from environment variable or use default
-STORAGE_BUCKET = os.environ.get('FIREBASE_STORAGE_BUCKET', 'racetomasterprestige.firebasestorage.app')
-
 
 class FirebaseStorageService:
     """Service for uploading files to Firebase Storage."""
@@ -22,6 +19,8 @@ class FirebaseStorageService:
     def __init__(self):
         """Initialize Firebase Storage service."""
         self.bucket = None
+        # Read at init time (not import time) so values loaded from .env are picked up
+        self.bucket_name = os.environ.get('FIREBASE_STORAGE_BUCKET', '').strip()
         self.upload_lock = threading.Lock()
         self._init_storage()
     
@@ -29,6 +28,10 @@ class FirebaseStorageService:
         """Initialize storage client."""
         if not STORAGE_AVAILABLE:
             print("⚠ Firebase Storage not available - install google-cloud-storage")
+            return
+        
+        if not self.bucket_name:
+            print("⚠ FIREBASE_STORAGE_BUCKET is not set - Firebase Storage uploads are disabled")
             return
         
         try:
@@ -47,8 +50,8 @@ class FirebaseStorageService:
                     # Try default credentials (might work if Firebase Admin is initialized)
                     storage_client = storage.Client()
             
-            self.bucket = storage_client.bucket(STORAGE_BUCKET)
-            print(f"✓ Firebase Storage initialized: {STORAGE_BUCKET}")
+            self.bucket = storage_client.bucket(self.bucket_name)
+            print(f"✓ Firebase Storage initialized: {self.bucket_name}")
         except Exception as e:
             print(f"⚠ Firebase Storage initialization failed: {e}")
             print("   File uploads to Firebase Storage will not work.")
@@ -73,7 +76,7 @@ class FirebaseStorageService:
                 blob = self.bucket.blob(remote_path)
                 if blob.exists():
                     blob.delete()
-                    print(f"✓ Deleted gs://{STORAGE_BUCKET}/{remote_path}")
+                    print(f"✓ Deleted gs://{self.bucket_name}/{remote_path}")
                     return True
                 else:
                     # File doesn't exist, which is fine
@@ -252,7 +255,7 @@ class FirebaseStorageService:
                 return False
             
             if upload_success[0]:
-                print(f"✓ Successfully uploaded {filename} to gs://{STORAGE_BUCKET}/{remote_path}")
+                print(f"✓ Successfully uploaded {filename} to gs://{self.bucket_name}/{remote_path}")
                 sys.stdout.flush()
                 return True
             else:

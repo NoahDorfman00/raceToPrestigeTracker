@@ -48,23 +48,25 @@ export FRAME_SCALE=0.75               # Resize frames to save memory (0.5-1.0)
 export PORT=5001                      # Port to run on
 export FLASK_ENV=production           # Production mode
 
-# Firebase (if using admin features)
+# Firebase
 export FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
+export FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app   # Required for uploads; uploads disabled if unset
+export AUTHORIZED_ADMIN_EMAILS=you@gmail.com                       # Required for admin; all admin requests rejected if unset
+
+# Optional
+export STREAMLINK_PATH=/path/to/venv/bin/streamlink   # Only needed if streamlink isn't on PATH or in the venv
 ```
 
 ### 4. Run the Application
 
-#### Development Mode (for testing):
 ```bash
 source venv/bin/activate
 python app.py
 ```
 
-#### Production Mode (with Gunicorn):
-```bash
-source venv/bin/activate
-gunicorn app:app --bind 0.0.0.0:5001 --workers 2 --threads 2
-```
+Run the app as a single process with `python app.py`, not gunicorn. Stream monitoring,
+the live check thread and the JSON data file all live in one process. Multiple gunicorn
+workers would each start their own monitors and overwrite each other's data.
 
 ## Production Deployment with Systemd
 
@@ -93,9 +95,11 @@ Environment="MAX_STREAMS=5"
 Environment="FRAME_SCALE=0.75"
 Environment="PORT=5001"
 Environment="FLASK_ENV=production"
+Environment="FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app"
+Environment="AUTHORIZED_ADMIN_EMAILS=you@gmail.com"
 # Uncomment and add if using Firebase:
 # Environment="FIREBASE_SERVICE_ACCOUNT_JSON={\"type\":\"service_account\",...}"
-ExecStart=/path/to/streamWatcher/venv/bin/gunicorn app:app --bind 0.0.0.0:5001 --workers 2 --threads 2
+ExecStart=/path/to/streamWatcher/venv/bin/python app.py
 Restart=always
 RestartSec=10
 
@@ -209,7 +213,7 @@ export FRAME_SCALE=0.5         # Resize frames to 50% (saves ~75% frame memory)
 ### Check if the app is running:
 ```bash
 sudo systemctl status streamwatcher
-ps aux | grep gunicorn
+ps aux | grep app.py
 ```
 
 ### Check logs:
@@ -252,7 +256,5 @@ sudo systemctl restart streamwatcher
 
 ## Performance Tuning
 
-- **Workers**: Adjust `--workers` in gunicorn based on CPU cores (typically 2-4)
-- **Threads**: Adjust `--threads` based on I/O operations (2-4 usually good)
 - **Memory**: Monitor with `htop` or `free -h` and adjust `MAX_STREAMS` and `FRAME_SCALE` accordingly
 

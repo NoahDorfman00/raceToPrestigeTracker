@@ -3,6 +3,8 @@ Simple file-based storage for stream data and level/prestige tracking.
 """
 import json
 import os
+import tempfile
+import threading
 import time
 from typing import Optional, Dict, List
 from datetime import datetime
@@ -22,6 +24,11 @@ class StreamDatabase:
         """
         self.data_file = data_file
         self.frames_dir = frames_dir
+        # Guards streams_data.json. Hold it across any load-modify-save cycle
+        # so concurrent threads (detection loops, live check, Flask requests)
+        # don't overwrite each other's updates. Reentrant so methods holding it
+        # can call _load_data/_save_data, which also take it.
+        self._lock = threading.RLock()
         self._init_data_file()
         self._init_frames_dir()
     
@@ -32,28 +39,72 @@ class StreamDatabase:
     
     def _init_data_file(self):
         """Create data file if it doesn't exist."""
-        if not os.path.exists(self.data_file):
-            data = {
-                'streams': {},
-                'next_id': 1
-            }
-            self._save_data(data)
-        else:
-            # Migrate existing file paths to new fixed format
-            self._migrate_frame_paths()
+        with self._lock:
+            if not os.path.exists(self.data_file):
+                data = {
+                    'streams': {},
+                    'next_id': 1
+                }
+                self._save_data(data)
+            else:
+                # Migrate existing file paths to new fixed format
+                self._migrate_frame_paths()
     
     def _load_data(self) -> Dict:
-        """Load data from file."""
-        try:
-            with open(self.data_file, 'r') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {'streams': {}, 'next_id': 1}
+        """
+        Load data from file.
+        
+        A missing file yields an empty dataset. A file that exists but can't be
+        parsed raises instead of returning an empty dataset, so a caller can't
+        go on to save that empty dataset over every stream.
+        """
+        with self._lock:
+            try:
+                with open(self.data_file, 'r') as f:
+                    return json.load(f)
+            except FileNotFoundError:
+                return {'streams': {}, 'next_id': 1}
+            except json.JSONDecodeError as e:
+                print(f"✗ {self.data_file} is corrupt and could not be parsed: {e}")
+                raise
+    
+    def _write_data_file(self, data: Dict):
+        """
+        Atomically write data to the data file.
+        
+        Writes to a temp file in the same directory, then os.replace()s it over
+        the data file, so readers see either the old or the new contents and
+        never a partially written file.
+        """
+        with self._lock:
+            data_dir = os.path.dirname(os.path.abspath(self.data_file))
+            fd, tmp_path = tempfile.mkstemp(
+                dir=data_dir,
+                prefix=f".{os.path.basename(self.data_file)}.",
+                suffix='.tmp'
+            )
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                # mkstemp creates the file 0600; keep the existing file's permissions
+                try:
+                    mode = os.stat(self.data_file).st_mode & 0o777
+                except FileNotFoundError:
+                    mode = 0o644
+                os.chmod(tmp_path, mode)
+                os.replace(tmp_path, self.data_file)
+            except BaseException:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+                raise
     
     def _save_data(self, data: Dict):
         """Save data to file."""
-        with open(self.data_file, 'w') as f:
-            json.dump(data, f, indent=2)
+        self._write_data_file(data)
         
         # Upload to Firebase Storage asynchronously
         storage_service = get_storage_service()
@@ -71,35 +122,37 @@ class StreamDatabase:
         Returns:
             Stream ID
         """
-        data = self._load_data()
-        
-        # Check if stream already exists
-        for stream_id, stream_data in data['streams'].items():
-            if stream_data['stream_url'] == stream_url:
-                # Update existing stream
-                stream_data['last_active'] = datetime.now().isoformat()
-                stream_data['is_active'] = True
-                if streamer_name:
-                    stream_data['streamer_name'] = streamer_name
-                self._save_data(data)
-                return int(stream_id)
-        
-        # Create new stream
-        stream_id = data['next_id']
-        data['streams'][str(stream_id)] = {
-            'id': stream_id,
-            'stream_url': stream_url,
-            'streamer_name': streamer_name or self._extract_streamer_name(stream_url),
-            'created_at': datetime.now().isoformat(),
-            'last_active': datetime.now().isoformat(),
-            'is_active': True,
-            'prestige': 0,
-            'level': 0,
-            'last_detected': None
-        }
-        data['next_id'] = stream_id + 1
-        self._save_data(data)
-        return stream_id
+        with self._lock:
+            data = self._load_data()
+            
+            # Check if stream already exists
+            for stream_id, stream_data in data['streams'].items():
+                if stream_data['stream_url'] == stream_url:
+                    # Update existing stream
+                    stream_data['last_active'] = datetime.now().isoformat()
+                    stream_data['is_active'] = True
+                    if streamer_name:
+                        stream_data['streamer_name'] = streamer_name
+                    self._save_data(data)
+                    return int(stream_id)
+            
+            # Create new stream
+            stream_id = data['next_id']
+            data['streams'][str(stream_id)] = {
+                'id': stream_id,
+                'stream_url': stream_url,
+                'streamer_name': streamer_name or self._extract_streamer_name(stream_url),
+                'created_at': datetime.now().isoformat(),
+                'last_active': datetime.now().isoformat(),
+                'is_active': True,  # Being tracked (not whether the stream is live)
+                'is_live': False,
+                'prestige': 0,
+                'level': 0,
+                'last_detected': None
+            }
+            data['next_id'] = stream_id + 1
+            self._save_data(data)
+            return stream_id
     
     def record_level_snapshot(self, stream_id: int, prestige: int, level: int, 
                              annotated_frame_path: Optional[str] = None,
@@ -120,34 +173,65 @@ class StreamDatabase:
         Returns:
             True if snapshot was recorded, False if it was a duplicate
         """
-        data = self._load_data()
-        stream_key = str(stream_id)
+        with self._lock:
+            data = self._load_data()
+            stream_key = str(stream_id)
+            
+            if stream_key not in data['streams']:
+                return False
+            
+            stream_data = data['streams'][stream_key]
+            
+            # Only update if different
+            if stream_data['prestige'] == prestige and stream_data['level'] == level:
+                return False
+            
+            # Update stream data
+            stream_data['prestige'] = prestige
+            stream_data['level'] = level
+            stream_data['last_detected'] = datetime.now().isoformat()
+            stream_data['last_active'] = datetime.now().isoformat()
+            
+            # Save annotated frame path, original frame path, and OCR logs
+            if annotated_frame_path:
+                stream_data['last_annotated_frame'] = annotated_frame_path
+            if original_frame_path:
+                stream_data['last_original_frame'] = original_frame_path
+            if ocr_logs:
+                stream_data['last_ocr_logs'] = ocr_logs
+            
+            self._save_data(data)
+            return True
+    
+    def update_detection_frame(self, stream_id: int, annotated_frame_path: str,
+                               original_frame_path: str, ocr_logs: List[Dict]) -> bool:
+        """
+        Record the latest detection frame paths and OCR logs for a stream,
+        whether or not the level changed.
         
-        if stream_key not in data['streams']:
-            return False
-        
-        stream_data = data['streams'][stream_key]
-        
-        # Only update if different
-        if stream_data['prestige'] == prestige and stream_data['level'] == level:
-            return False
-        
-        # Update stream data
-        stream_data['prestige'] = prestige
-        stream_data['level'] = level
-        stream_data['last_detected'] = datetime.now().isoformat()
-        stream_data['last_active'] = datetime.now().isoformat()
-        
-        # Save annotated frame path, original frame path, and OCR logs
-        if annotated_frame_path:
+        Args:
+            stream_id: Stream ID
+            annotated_frame_path: Path to saved annotated frame image
+            original_frame_path: Path to saved original (non-annotated) frame image
+            ocr_logs: List of OCR log entries
+            
+        Returns:
+            True if saved, False if the stream isn't in the database
+        """
+        with self._lock:
+            data = self._load_data()
+            stream_key = str(stream_id)
+            
+            if stream_key not in data['streams']:
+                return False
+            
+            stream_data = data['streams'][stream_key]
             stream_data['last_annotated_frame'] = annotated_frame_path
-        if original_frame_path:
             stream_data['last_original_frame'] = original_frame_path
-        if ocr_logs:
             stream_data['last_ocr_logs'] = ocr_logs
-        
-        self._save_data(data)
-        return True
+            stream_data['last_active'] = datetime.now().isoformat()
+            self._save_data(data)
+            return True
     
     def get_last_annotated_frame_path(self, stream_id: int) -> Optional[str]:
         """Get path to last annotated frame for a stream."""
@@ -282,21 +366,43 @@ class StreamDatabase:
     
     def deactivate_stream(self, stream_id: int):
         """Mark a stream as inactive."""
-        data = self._load_data()
-        stream_key = str(stream_id)
-        
-        if stream_key in data['streams']:
-            data['streams'][stream_key]['is_active'] = False
+        with self._lock:
+            data = self._load_data()
+            stream_key = str(stream_id)
+            
+            if stream_key in data['streams']:
+                data['streams'][stream_key]['is_active'] = False
+                self._save_data(data)
+    
+    def set_live_status(self, stream_id: int, is_live: bool):
+        """
+        Record whether a stream is currently live on Twitch.
+        Only writes (and uploads) when the value changes.
+        """
+        with self._lock:
+            data = self._load_data()
+            stream_key = str(stream_id)
+            
+            if stream_key not in data['streams']:
+                return
+            
+            stream_data = data['streams'][stream_key]
+            if stream_data.get('is_live') == is_live:
+                return
+            
+            stream_data['is_live'] = is_live
+            stream_data['live_changed_at'] = datetime.now().isoformat()
             self._save_data(data)
     
     def delete_stream(self, stream_id: int):
         """Delete a stream."""
-        data = self._load_data()
-        stream_key = str(stream_id)
-        
-        if stream_key in data['streams']:
-            del data['streams'][stream_key]
-            self._save_data(data)
+        with self._lock:
+            data = self._load_data()
+            stream_key = str(stream_id)
+            
+            if stream_key in data['streams']:
+                del data['streams'][stream_key]
+                self._save_data(data)
     
     def _extract_streamer_name(self, stream_url: str) -> str:
         """Extract streamer name from URL."""
@@ -390,9 +496,8 @@ class StreamDatabase:
             
             if updated:
                 # Save migrated data (but don't trigger Firebase upload during migration)
-                # Save directly to avoid triggering upload
-                with open(self.data_file, 'w') as f:
-                    json.dump(data, f, indent=2)
+                # Write directly instead of via _save_data to avoid triggering upload
+                self._write_data_file(data)
                 print(f"✓ Migrated frame paths in {self.data_file}")
                 return True
             else:

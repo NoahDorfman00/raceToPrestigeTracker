@@ -5,11 +5,9 @@ import threading
 import time
 import subprocess
 import os
-import shutil
 import sys
 from typing import Dict, Optional, List
-from datetime import datetime
-from stream_capture import StreamCapture
+from stream_capture import StreamCapture, find_streamlink
 from level_detector import LevelDetector
 from database import StreamDatabase
 from firebase_storage import get_storage_service
@@ -37,6 +35,9 @@ class StreamInfo:
         self.detection_regions = []
         self.detected_region = None
         self.ocr_logs = []  # OCR logs for the most recent successful detection
+        # Tracking for readings lower than the stored progress (likely OCR misreads)
+        self.regression_first_seen: Optional[float] = None
+        self.regression_count = 0
 
 
 class StreamManager:
@@ -55,6 +56,12 @@ class StreamManager:
         self.streams: Dict[int, StreamInfo] = {}
         self.lock = threading.Lock()
         self.detection_cooldown = 2.0  # Seconds between detections per stream
+        # A reading lower than the stored progress is rejected unless lower readings keep
+        # arriving (with no reading at or above stored progress in between) for at least
+        # this many detections AND this many seconds. This lets a bad stored value be
+        # corrected without letting a single misread overwrite progress.
+        self.regression_confirm_count = int(os.environ.get('REGRESSION_CONFIRM_COUNT', 5))
+        self.regression_confirm_seconds = float(os.environ.get('REGRESSION_CONFIRM_SECONDS', 600))
         self.live_check_interval = 60.0  # Check if streams are live every 60 seconds
         self.live_check_thread: Optional[threading.Thread] = None
         self.live_check_running = False
@@ -133,26 +140,6 @@ class StreamManager:
                 del self.streams[stream_id]
                 self.database.delete_stream(stream_id)
     
-    def _find_streamlink(self) -> Optional[str]:
-        """Find streamlink executable."""
-        # First try shutil.which which uses PATH
-        streamlink_path = shutil.which('streamlink')
-        if streamlink_path:
-            return streamlink_path
-        
-        # Fallback to known locations
-        possible_paths = [
-            '/home/noah/raceToPrestigeTracker/venv/bin/streamlink',
-            '/usr/local/bin/streamlink',
-            '/usr/bin/streamlink',
-        ]
-        
-        for path in possible_paths:
-            if os.path.exists(path) and os.access(path, os.X_OK):
-                return path
-        
-        return None
-    
     def _check_stream_live(self, stream_url: str) -> bool:
         """
         Check if a stream is currently live using streamlink.
@@ -170,7 +157,7 @@ class StreamManager:
                 url = f'https://www.twitch.tv/{url}'
             
             # Find streamlink
-            streamlink_path = self._find_streamlink()
+            streamlink_path = find_streamlink()
             if not streamlink_path:
                 print(f"ERROR: streamlink not found. Cannot check if stream is live: {url}")
                 return False
@@ -218,6 +205,7 @@ class StreamManager:
         
         # Check if stream is live before starting capture
         is_live = self._check_stream_live(stream_info.stream_url)
+        self.database.set_live_status(stream_id, is_live)
         if not is_live:
             print(f"Stream {stream_id} ({stream_info.streamer_name or stream_info.stream_url}) is not live, skipping capture")
             stream_info.error = "Stream is not live"
@@ -352,11 +340,34 @@ class StreamManager:
                                         is_valid_progression = True
                                     else:
                                         # Level went down without prestige increase - invalid
-                                        print(f"Stream {stream_id}: Invalid progression detected - "
-                                              f"Current: P{stream_info.prestige} L{stream_info.level} ({current_total}), "
-                                              f"Detected: P{new_prestige} L{new_level} ({new_total}) - "
-                                              f"Will save frame/OCR but not update stored values")
                                         is_valid_progression = False
+                                    
+                                    if is_valid_progression:
+                                        stream_info.regression_first_seen = None
+                                        stream_info.regression_count = 0
+                                    else:
+                                        # Backwards reading: reject unless it has been consistently confirmed
+                                        if stream_info.regression_first_seen is None:
+                                            stream_info.regression_first_seen = current_time
+                                        stream_info.regression_count += 1
+                                        regression_elapsed = current_time - stream_info.regression_first_seen
+                                        
+                                        if (stream_info.regression_count >= self.regression_confirm_count and
+                                                regression_elapsed >= self.regression_confirm_seconds):
+                                            print(f"Stream {stream_id}: Accepting lower progression after "
+                                                  f"{stream_info.regression_count} consistent readings over {int(regression_elapsed)}s - "
+                                                  f"Current: P{stream_info.prestige} L{stream_info.level}, "
+                                                  f"Detected: P{new_prestige} L{new_level}")
+                                            is_valid_progression = True
+                                            stream_info.regression_first_seen = None
+                                            stream_info.regression_count = 0
+                                        else:
+                                            print(f"Stream {stream_id}: Rejecting backwards reading - "
+                                                  f"Current: P{stream_info.prestige} L{stream_info.level} ({current_total}), "
+                                                  f"Detected: P{new_prestige} L{new_level} ({new_total}) - "
+                                                  f"{stream_info.regression_count}/{self.regression_confirm_count} readings, "
+                                                  f"{int(regression_elapsed)}/{int(self.regression_confirm_seconds)}s. "
+                                                  f"Will save frame/OCR but not update stored values")
                                     
                                     # Create annotated frame for display with all annotation boxes
                                     annotated_frame = frame.copy()
@@ -437,25 +448,20 @@ class StreamManager:
                                     # Always save frame and OCR logs to database for persistence
                                     # Update database with frame paths and OCR logs (even if level hasn't changed)
                                     try:
-                                        data = self.database._load_data()
-                                        stream_key = str(stream_id)
-                                        if stream_key in data['streams']:
-                                            stream_data = data['streams'][stream_key]
-                                            stream_data['last_annotated_frame'] = annotated_frame_path
-                                            stream_data['last_original_frame'] = original_frame_path
-                                            stream_data['last_ocr_logs'] = [ocr_log_entry]
-                                            stream_data['last_active'] = datetime.now().isoformat()
-                                            self.database._save_data(data)
+                                        if self.database.update_detection_frame(
+                                                stream_id, annotated_frame_path, original_frame_path,
+                                                [ocr_log_entry]):
                                             print(f"Stream {stream_id}: Successfully saved frame paths and OCR logs to database")
                                         else:
-                                            print(f"Stream {stream_id}: WARNING - Stream {stream_key} not found in database")
+                                            print(f"Stream {stream_id}: WARNING - Stream {stream_id} not found in database")
                                     except Exception as e:
                                         print(f"Stream {stream_id}: ERROR saving to database - {e}")
                                         import traceback
                                         traceback.print_exc()
                                     
-                                    # Only update level/prestige if different
-                                    if (new_prestige != stream_info.prestige or 
+                                    # Only update level/prestige if the reading is accepted and different
+                                    if is_valid_progression and (
+                                        new_prestige != stream_info.prestige or
                                         new_level != stream_info.level):
                                         
                                         # Record level snapshot in database
@@ -620,6 +626,7 @@ class StreamManager:
                     
                     # Check if stream is live
                     is_live = self._check_stream_live(stream_info.stream_url)
+                    self.database.set_live_status(stream_id, is_live)
                     
                     with self.lock:
                         if stream_id not in self.streams:

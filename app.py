@@ -11,13 +11,14 @@ import os
 import json
 from functools import wraps
 from dotenv import load_dotenv
+
+# Load environment variables from .env file before importing modules that read them
+load_dotenv()
+
 from level_detector import LevelDetector
 from stream_manager import StreamManager
 from database import StreamDatabase
 from firebase_storage import get_storage_service
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Firebase Admin SDK for token verification
 try:
@@ -65,12 +66,18 @@ if FIREBASE_AVAILABLE:
 # Authorized admin emails (whitelist)
 # Load from environment variable (comma-separated list)
 # Example: AUTHORIZED_ADMIN_EMAILS=email1@gmail.com,email2@gmail.com
+# If unset or empty, no one is authorized (fail closed).
 authorized_emails_env = os.environ.get('AUTHORIZED_ADMIN_EMAILS', '')
-if authorized_emails_env:
-    AUTHORIZED_ADMIN_EMAILS = [email.strip() for email in authorized_emails_env.split(',') if email.strip()]
-else:
-    # Fallback to default if not set in environment
-    AUTHORIZED_ADMIN_EMAILS = ['n.dorfman00@gmail.com']
+AUTHORIZED_ADMIN_EMAILS = [email.strip().lower() for email in authorized_emails_env.split(',') if email.strip()]
+if not AUTHORIZED_ADMIN_EMAILS:
+    print("WARNING: AUTHORIZED_ADMIN_EMAILS is not set. All admin requests will be rejected.")
+
+def is_authorized_admin(decoded_token) -> bool:
+    """Check that a verified Firebase token belongs to a whitelisted, verified email."""
+    user_email = (decoded_token.get('email') or '').lower()
+    if not user_email or not decoded_token.get('email_verified', False):
+        return False
+    return user_email in AUTHORIZED_ADMIN_EMAILS
 
 def require_auth(f):
     """Decorator to require Firebase authentication and authorized email."""
@@ -101,8 +108,8 @@ def require_auth(f):
             user_email = decoded_token.get('email')
             print(f"Token verified for user: {user_email}")
             
-            # Check if email is authorized (if whitelist is configured)
-            if AUTHORIZED_ADMIN_EMAILS and user_email not in AUTHORIZED_ADMIN_EMAILS:
+            # Check if email is authorized
+            if not is_authorized_admin(decoded_token):
                 print(f"Unauthorized access attempt: {user_email}")
                 return jsonify({'error': 'Unauthorized: Your email is not authorized to access the admin panel'}), 403
             
@@ -188,7 +195,7 @@ def initialize_app():
     stream_manager.start_live_check()
     print("✓ Live stream checking enabled (checks every 60 seconds)")
 
-# Initialize the application when module is imported (works with gunicorn)
+# Initialize the application when module is imported
 # This ensures streams are restored and live check starts in production
 initialize_app()
 
@@ -270,8 +277,8 @@ def verify_token():
         decoded_token = auth.verify_id_token(token)
         user_email = decoded_token.get('email')
         
-        # Check if email is authorized (if whitelist is configured)
-        if AUTHORIZED_ADMIN_EMAILS and user_email not in AUTHORIZED_ADMIN_EMAILS:
+        # Check if email is authorized
+        if not is_authorized_admin(decoded_token):
             print(f"Unauthorized access attempt: {user_email}")
             return jsonify({
                 'valid': False,
@@ -503,10 +510,11 @@ def get_status():
 
 
 @app.route('/api/update_config', methods=['POST'])
+@require_auth
 def update_config():
     """Update the template configuration file."""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         
         # Load existing config or create new
         config_path = 'template_config.json'

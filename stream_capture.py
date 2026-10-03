@@ -8,8 +8,40 @@ import queue
 import time
 import os
 import shutil
+import sys
 import numpy as np
 from typing import Optional, Generator
+
+
+def find_streamlink() -> Optional[str]:
+    """
+    Find streamlink executable.
+
+    Checks, in order: the STREAMLINK_PATH environment variable, PATH,
+    the bin directory of the running Python (e.g. a virtualenv), then
+    common system locations.
+    """
+    env_path = os.environ.get('STREAMLINK_PATH')
+    if env_path:
+        if os.path.exists(env_path) and os.access(env_path, os.X_OK):
+            return env_path
+        print(f"WARNING: STREAMLINK_PATH is set to {env_path} but it is not an executable file")
+
+    streamlink_path = shutil.which('streamlink')
+    if streamlink_path:
+        return streamlink_path
+
+    possible_paths = [
+        os.path.join(os.path.dirname(sys.executable), 'streamlink'),
+        '/usr/local/bin/streamlink',
+        '/usr/bin/streamlink',
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            return path
+
+    return None
 
 
 class StreamCapture:
@@ -35,26 +67,6 @@ class StreamCapture:
             url = f'https://www.twitch.tv/{url}'
         return url
     
-    def _find_streamlink(self) -> Optional[str]:
-        """Find streamlink executable."""
-        # First try shutil.which which uses PATH
-        streamlink_path = shutil.which('streamlink')
-        if streamlink_path:
-            return streamlink_path
-        
-        # Fallback to known locations
-        possible_paths = [
-            '/home/noah/raceToPrestigeTracker/venv/bin/streamlink',
-            '/usr/local/bin/streamlink',
-            '/usr/bin/streamlink',
-        ]
-        
-        for path in possible_paths:
-            if os.path.exists(path) and os.access(path, os.X_OK):
-                return path
-        
-        return None
-    
     def _capture_frames(self):
         """Internal method to capture frames in a separate thread."""
         url = self._normalize_url(self.stream_url)
@@ -62,7 +74,7 @@ class StreamCapture:
         
         try:
             # Find streamlink
-            streamlink_path = self._find_streamlink()
+            streamlink_path = find_streamlink()
             if not streamlink_path:
                 raise Exception("streamlink not found. Please install streamlink: pip install streamlink")
             
