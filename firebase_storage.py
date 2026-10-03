@@ -22,6 +22,10 @@ class FirebaseStorageService:
         # Read at init time (not import time) so values loaded from .env are picked up
         self.bucket_name = os.environ.get('FIREBASE_STORAGE_BUCKET', '').strip()
         self.upload_lock = threading.Lock()
+        # Serializes and coalesces streams_data.json uploads (see upload_streams_data_async)
+        self._data_upload_lock = threading.Lock()
+        self._data_upload_pending: Optional[str] = None
+        self._data_upload_running = False
         self._init_storage()
     
     def _init_storage(self):
@@ -339,11 +343,37 @@ class FirebaseStorageService:
         """
         Upload streams_data.json asynchronously.
         
+        Uploads run one at a time on a single worker thread. A save made while an
+        upload is in progress triggers one more upload once it finishes. Each upload
+        reads the file when it starts, so the last upload always carries the latest
+        contents. (Independent concurrent uploads could finish out of order and leave
+        an older copy in storage.)
+        
         Args:
             local_path: Local file path (default: streams_data.json)
         """
-        remote_path = "streams_data.json"
-        self.upload_file_async(local_path, remote_path)
+        with self._data_upload_lock:
+            self._data_upload_pending = local_path
+            if self._data_upload_running:
+                return
+            self._data_upload_running = True
+        
+        thread = threading.Thread(target=self._streams_data_upload_worker, daemon=True)
+        thread.start()
+    
+    def _streams_data_upload_worker(self):
+        """Upload streams_data.json until no newer save is pending."""
+        while True:
+            with self._data_upload_lock:
+                local_path = self._data_upload_pending
+                self._data_upload_pending = None
+                if local_path is None:
+                    self._data_upload_running = False
+                    return
+            try:
+                self.upload_streams_data(local_path)
+            except Exception as e:
+                print(f"✗ Error uploading streams_data.json: {e}")
     
     def upload_all_files(self, database, annotated_frames_dir: str = "annotated_frames", 
                         streams_data_path: str = "streams_data.json", cleanup_old: bool = True) -> dict:
