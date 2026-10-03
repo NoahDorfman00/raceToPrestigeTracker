@@ -226,6 +226,12 @@ sudo journalctl -u streamwatcher -f
 sudo systemctl restart streamwatcher
 ```
 
+### App fails at startup with "streams_data.json is corrupt":
+The app refuses to start rather than treat an unreadable data file as empty and overwrite
+every stream. Writes are atomic, so this should only happen if the file was edited by hand
+or the disk failed. Restore the file from the copy in Firebase Storage (`streams_data.json`
+at the bucket root), or move it aside to start with no streams, then restart.
+
 ### Test Tesseract:
 ```bash
 tesseract --version
